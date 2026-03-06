@@ -1,0 +1,93 @@
+# BufferTrack
+
+![BufferTrack Hero Image](https://via.placeholder.com/1200x400?text=BufferTrack+-+Construction+Project+Management)
+
+BufferTrack is a modern SaaS web application designed for construction project management. It leverages **Lean Construction** principles and the **Last Planner System (LPS)** to streamline commitments, visualize progress, and calculate PPC (Percent Plan Complete) in real time.
+
+## 🌟 Key Features
+
+*   **Interactive Floor Plans**: Multi-level viewer (Master Plan → Building → Floor) with zoom, pan, and interactive activity pins.
+*   **Commitment Workflow**: End-to-end management from request to completion, including delayed and restricted states.
+*   **Weekly Calendar Integration**: Bidirectional synchronization between the current/next week calendar and the plan viewer.
+*   **Real-time PPC Dashboard**: Analytics broken down by specialty, subcontractor, and zone.
+*   **Role-Based Access**: 9 distinct roles with specific permissions ensuring data integrity.
+*   **Live Updates**: Powered by Socket.io for instant pin state synchronization across all connected clients.
+
+## 🛠 Tech Stack
+
+*   **Frontend**: Next.js 14+ (App Router), React, Tailwind CSS 3+
+*   **Language**: TypeScript 5+ (Strict Mode)
+*   **Backend/API**: Next.js API Routes, NextAuth.js v5
+*   **Database**: MongoDB 7+ via Mongoose 8+
+*   **Real-time**: Socket.io
+*   **Storage**: Google Cloud Storage (for high-resolution floor plans)
+*   **State Management**: Zustand
+*   **Validation**: Zod
+*   **Testing**: Jest + React Testing Library
+
+## 🚀 Getting Started
+
+### Prerequisites
+
+*   Node.js (v18 or higher recommended)
+*   npm (v9 or higher)
+*   MongoDB instance (local or Atlas)
+*   Google Cloud Storage bucket
+
+### Installation
+
+1.  Clone the repository:
+    ```bash
+    git clone https://github.com/yourusername/buffertrack.git
+    cd buffertrack
+    ```
+
+2.  Install dependencies:
+    ```bash
+    npm install
+    ```
+
+3.  Configure Environment Variables:
+    Create a `.env.local` file in the root directory and configure it based on `.env.example`:
+    ```env
+    MONGODB_URI=your_mongodb_connection_string
+    NEXTAUTH_SECRET=your_nextauth_secret
+    NEXTAUTH_URL=http://localhost:3000
+    GCS_BUCKET_NAME=your_gcs_bucket_name
+    GCS_PROJECT_ID=your_gcs_project_id
+    GCS_SERVICE_ACCOUNT_KEY=your_gcs_service_account_credentials_json
+    NEXT_PUBLIC_SOCKET_URL=http://localhost:3000
+    ```
+
+4.  Start the development server:
+    ```bash
+    npm run dev
+    ```
+
+    Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+
+## 📁 Project Structure highlights
+We strictly follow Atomic Design principles for our components.
+
+*   `src/app`: Next.js App Router (pages and API)
+*   `src/components`: Atomic Design hierarchy (atoms, molecules, organisms, templates, pages)
+*   `src/models`: Mongoose database schemas
+*   `src/services` & `src/repositories`: Business logic and data access layers.
+
+For detailed architecture and development conventions, strictly refer to `AGENTS.md`.
+
+## 🧪 Testing
+
+We value test coverage to maintain application stability.
+
+```bash
+# Run all tests
+npm test
+
+# Run a specific test suite
+npx jest --testNamePattern="<test-name>"
+```
+
+## 📄 License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
