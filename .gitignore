@@ -37,7 +37,6 @@ next-env.d.ts
 
 # agents and system-generated
 .agent/
-.agents/
 .gemini/
 build_error.log
 code.html
