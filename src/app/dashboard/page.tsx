@@ -10,8 +10,9 @@ import { PendingAccessView } from "@/components/organisms/PendingAccessView";
 export default async function DashboardPage({
     searchParams
 }: {
-    searchParams: { [key: string]: string | string[] | undefined }
+    searchParams: Promise<{ [key: string]: string | string[] | undefined }>
 }) {
+    const resolvedSearchParams = await searchParams;
     const session = await auth();
     if (!session?.user) {
         redirect("/login");
@@ -36,7 +37,7 @@ export default async function DashboardPage({
     }
 
     // Determine current project Id
-    const queryProjectId = searchParams.projectId as string;
+    const queryProjectId = resolvedSearchParams.projectId as string;
     const currentProjectId = queryProjectId && projectsList.some(p => p.id === queryProjectId)
         ? queryProjectId
         : projectsList[0].id;
@@ -48,7 +49,7 @@ export default async function DashboardPage({
     const monday = new Date(today.setDate(diff));
     monday.setHours(0, 0, 0, 0);
 
-    const queryWeekStart = searchParams.weekStart as string;
+    const queryWeekStart = resolvedSearchParams.weekStart as string;
     const currentWeekStart = queryWeekStart ? new Date(queryWeekStart) : monday;
 
     // Fetch the metrics server-side

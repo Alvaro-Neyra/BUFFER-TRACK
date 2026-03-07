@@ -14,8 +14,9 @@ import { ManageProjectView } from "./ManageProjectView";
 export default async function ManageProjectPage({
     searchParams,
 }: {
-    searchParams: { [key: string]: string | string[] | undefined };
+    searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 }) {
+    const resolvedSearchParams = await searchParams;
     const session = await auth();
     if (!session?.user) {
         redirect("/login");
@@ -37,7 +38,7 @@ export default async function ManageProjectPage({
         return <PendingAccessView />;
     }
 
-    const queryProjectId = searchParams.projectId as string;
+    const queryProjectId = resolvedSearchParams.projectId as string;
     const currentProjectId =
         queryProjectId && userProjectIds.includes(queryProjectId)
             ? queryProjectId
@@ -76,8 +77,8 @@ export default async function ManageProjectPage({
     }));
 
     // Compute commitment counts per building
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const commitmentCounts: Record<string, number> = {};
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     commitments.forEach((c: any) => {
         const bId = c.buildingId?._id?.toString() || c.buildingId?.toString() || "";
         if (bId) commitmentCounts[bId] = (commitmentCounts[bId] || 0) + 1;

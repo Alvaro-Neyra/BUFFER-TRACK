@@ -8,8 +8,9 @@ import { DetailPlanView } from "./DetailPlanView";
 export default async function DetailPlanPage({
     params,
 }: {
-    params: { floorId: string };
+    params: Promise<{ floorId: string }>;
 }) {
+    const { floorId } = await params;
     const session = await auth();
     if (!session?.user) {
         redirect("/login");
@@ -23,14 +24,14 @@ export default async function DetailPlanPage({
     await connectToDatabase();
 
     // Fetch floor data
-    const floorData = await getFloorData(params.floorId);
+    const floorData = await getFloorData(floorId);
     if (!floorData) {
         redirect("/");
     }
 
     // Fetch data in parallel
     const [commitments, { specialties, users }] = await Promise.all([
-        getFloorCommitments(params.floorId),
+        getFloorCommitments(floorId),
         getSpecialtiesWithUsers(floorData.projectId),
     ]);
 

@@ -24,6 +24,7 @@ interface ISerializedBuilding {
     code: string;
     number: number;
     coordinates: { xPercent: number; yPercent: number };
+    polygon?: Array<{ xPercent: number; yPercent: number }>;
     floors: Array<{ _id: string; label: string; order: number }>;
 }
 
@@ -34,6 +35,7 @@ export interface IBuildingWithFloors {
     code: string;
     number: number;
     coordinates: { xPercent: number; yPercent: number };
+    polygon?: Array<{ xPercent: number; yPercent: number }>;
     floors: Array<{
         _id: string;
         label: string;
@@ -73,6 +75,7 @@ export class ProjectService {
                 code: b.code,
                 number: b.number,
                 coordinates: b.coordinates,
+                polygon: b.polygon && b.polygon.length >= 3 ? b.polygon : undefined,
                 floors: floors.map(f => ({
                     _id: f._id.toString(),
                     label: f.label,
@@ -99,6 +102,7 @@ export class ProjectService {
                 code: building.code,
                 number: building.number,
                 coordinates: building.coordinates,
+                polygon: building.polygon && building.polygon.length >= 3 ? building.polygon : undefined,
                 floors: floors.map((f) => ({
                     _id: f._id.toString(),
                     label: f.label,
@@ -116,7 +120,13 @@ export class ProjectService {
      */
     static async createBuilding(
         projectId: string,
-        data: { name: string; code: string; number: number; coordinates: { xPercent: number; yPercent: number } }
+        data: {
+            name: string;
+            code: string;
+            number: number;
+            coordinates: { xPercent: number; yPercent: number };
+            polygon?: Array<{ xPercent: number; yPercent: number }>;
+        }
     ): Promise<IBuildingWithFloors> {
         const building = await BuildingRepository.create({
             projectId: new mongoose.Types.ObjectId(projectId),
@@ -129,6 +139,7 @@ export class ProjectService {
             code: building.code,
             number: building.number,
             coordinates: building.coordinates,
+            polygon: building.polygon && building.polygon.length >= 3 ? building.polygon : undefined,
             floors: [],
         };
     }

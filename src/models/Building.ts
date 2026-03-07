@@ -9,6 +9,8 @@ export interface IBuilding extends Document {
         xPercent: number; // 0 to 100
         yPercent: number; // 0 to 100
     };
+    // Optional free-draw polygon zone (array of percentage-based points)
+    polygon?: Array<{ xPercent: number; yPercent: number }>;
     createdAt: Date;
     updatedAt: Date;
 }
@@ -26,6 +28,13 @@ const BuildingSchema: Schema = new Schema(
             xPercent: { type: Number, required: true, min: 0, max: 100 },
             yPercent: { type: Number, required: true, min: 0, max: 100 },
         },
+        // Optional: free-draw polygon zone stored as array of percentage points.
+        // When present, the building is rendered as a filled polygon on the plan.
+        // The `coordinates` field still holds the centroid for label placement.
+        polygon: [{
+            xPercent: { type: Number, min: 0, max: 100 },
+            yPercent: { type: Number, min: 0, max: 100 },
+        }],
     },
     { timestamps: true }
 );

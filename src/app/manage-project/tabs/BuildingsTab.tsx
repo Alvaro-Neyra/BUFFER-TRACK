@@ -1,11 +1,14 @@
 "use client";
 
-import React, { useState, useTransition, useRef } from "react";
+import React, { useState, useTransition, useRef, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
-import { TransformWrapper, TransformComponent } from "react-zoom-pan-pinch";
+import Panzoom from "@panzoom/panzoom";
 import { createBuilding, updateBuilding, deleteBuilding, createFloor, deleteFloor, updateMasterPlanImage } from "../actions";
 import { compressImage, formatFileSize } from "@/lib/compressImage";
+import { FreeDrawOverlay } from "@/components/organisms/FreeDrawOverlay";
+import type { IPercentPoint } from "@/components/organisms/FreeDrawOverlay";
+import { PixelGridOverlay } from "@/components/atoms/PixelGridOverlay";
 import type { IBuildingWithFloors } from "@/services/project.service";
 
 interface IBuildingsTabProps {
@@ -15,7 +18,7 @@ interface IBuildingsTabProps {
     commitmentCounts: Record<string, number>; // buildingId → count
 }
 
-type TMode = "view" | "placing";
+type TMode = "view" | "placing" | "drawing";
 
 export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, commitmentCounts }: IBuildingsTabProps) {
     const router = useRouter();
@@ -33,6 +36,7 @@ export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, 
     // Build form state
     const [newBuilding, setNewBuilding] = useState({ name: "", code: "", number: 1 });
     const [pendingCoords, setPendingCoords] = useState<{ x: number; y: number } | null>(null);
+    const [pendingPolygon, setPendingPolygon] = useState<IPercentPoint[] | null>(null);
 
     // Edit state
     const [editingBuilding, setEditingBuilding] = useState<string | null>(null);
@@ -129,10 +133,12 @@ export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, 
                 code: newBuilding.code,
                 number: newBuilding.number,
                 coordinates: { xPercent: pendingCoords.x, yPercent: pendingCoords.y },
+                ...(pendingPolygon && pendingPolygon.length >= 3 ? { polygon: pendingPolygon } : {}),
             });
             if (res.success) {
                 setMode("view");
                 setPendingCoords(null);
+                setPendingPolygon(null);
                 setNewBuilding({ name: "", code: "", number: buildings.length + 2 });
                 router.refresh();
             } else {
@@ -194,6 +200,85 @@ export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, 
 
     const showCount = zoomScale >= 2.5;
 
+    // Panzoom setup — image-overlay separation for zero-lag
+    const imgRef = useRef<HTMLImageElement>(null);
+    const overlayRef = useRef<HTMLDivElement>(null);
+    const panzoomRef = useRef<ReturnType<typeof Panzoom> | null>(null);
+    const rafIdRef = useRef<number>(0);
+
+    useEffect(() => {
+        const img = imgRef.current;
+        const parent = planContainerRef.current;
+        if (!img || !parent) return;
+
+        // Panzoom on <img> ONLY — single DOM node, maximum performance
+        const pz = Panzoom(img, {
+            maxScale: 50,
+            minScale: 0.02,
+            startScale: 1,
+            step: 0.15,
+            cursor: "grab",
+            touchAction: "none",
+            disablePan: mode === "placing" || mode === "drawing",
+        });
+
+        panzoomRef.current = pz;
+
+        // Sync overlay transform on every frame (direct DOM, zero React re-renders)
+        const syncOverlay = () => {
+            const overlay = overlayRef.current;
+            if (overlay && img) overlay.style.transform = img.style.transform;
+        };
+
+        // Throttle scale state update
+        const updateScale = () => {
+            cancelAnimationFrame(rafIdRef.current);
+            rafIdRef.current = requestAnimationFrame(() => setZoomScale(pz.getScale()));
+        };
+
+        const handleWheel = (e: WheelEvent) => pz.zoomWithWheel(e);
+        parent.addEventListener("wheel", handleWheel, { passive: false });
+
+        img.addEventListener("panzoomchange", syncOverlay);
+        img.addEventListener("panzoompan", syncOverlay);
+        img.addEventListener("panzoomzoom", syncOverlay);
+        img.addEventListener("panzoomzoom", updateScale);
+        img.addEventListener("panzoomend", syncOverlay);
+        img.addEventListener("panzoomend", updateScale);
+
+        return () => {
+            cancelAnimationFrame(rafIdRef.current);
+            parent.removeEventListener("wheel", handleWheel);
+            img.removeEventListener("panzoomchange", syncOverlay);
+            img.removeEventListener("panzoompan", syncOverlay);
+            img.removeEventListener("panzoomzoom", syncOverlay);
+            img.removeEventListener("panzoomzoom", updateScale);
+            img.removeEventListener("panzoomend", syncOverlay);
+            img.removeEventListener("panzoomend", updateScale);
+            pz.destroy();
+            panzoomRef.current = null;
+        };
+    }, [masterPlanImageUrl]);
+
+    // Update disablePan when mode changes
+    useEffect(() => {
+        if (panzoomRef.current) {
+            panzoomRef.current.setOptions({
+                disablePan: mode === "placing" || mode === "drawing",
+            });
+        }
+    }, [mode]);
+
+    const handleZoomIn = useCallback(() => panzoomRef.current?.zoomIn(), []);
+    const handleZoomOut = useCallback(() => panzoomRef.current?.zoomOut(), []);
+    const handleReset = useCallback(() => {
+        panzoomRef.current?.reset();
+        if (overlayRef.current) overlayRef.current.style.transform = "";
+    }, []);
+
+    // Figma-style: pixelated rendering at high zoom
+    const imageRendering = zoomScale >= 8 ? "pixelated" as const : "auto" as const;
+
     return (
         <div className="flex flex-col lg:flex-row gap-6 h-full min-h-[600px]">
             {/* Compression info banner */}
@@ -217,7 +302,9 @@ export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, 
                                 ? "Upload a master plan image to get started"
                                 : mode === "placing"
                                     ? "👆 Click on the plan to place the building"
-                                    : `${buildings.length} building${buildings.length !== 1 ? "s" : ""} placed`
+                                    : mode === "drawing"
+                                        ? "✏️ Draw a zone on the plan to define the building area"
+                                        : `${buildings.length} building${buildings.length !== 1 ? "s" : ""} placed`
                             }
                         </p>
                     </div>
@@ -233,20 +320,35 @@ export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, 
                             </button>
                         )}
                         {masterPlanImageUrl && mode === "view" ? (
+                            <div className="flex items-center gap-2">
+                                <button
+                                    onClick={() => {
+                                        setMode("placing");
+                                        setNewBuilding({ name: "", code: "", number: buildings.length + 1 });
+                                        setPendingCoords(null);
+                                        setPendingPolygon(null);
+                                    }}
+                                    className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-lg text-sm font-bold hover:bg-primary/90 transition-colors shadow-sm"
+                                >
+                                    <span className="material-symbols-outlined text-[18px]">add_location_alt</span>
+                                    Place Pin
+                                </button>
+                                <button
+                                    onClick={() => {
+                                        setMode("drawing");
+                                        setNewBuilding({ name: "", code: "", number: buildings.length + 1 });
+                                        setPendingCoords(null);
+                                        setPendingPolygon(null);
+                                    }}
+                                    className="flex items-center gap-2 px-4 py-2 bg-emerald-500 text-white rounded-lg text-sm font-bold hover:bg-emerald-600 transition-colors shadow-sm"
+                                >
+                                    <span className="material-symbols-outlined text-[18px]">draw</span>
+                                    Draw Zone
+                                </button>
+                            </div>
+                        ) : masterPlanImageUrl && (mode === "placing" || mode === "drawing") ? (
                             <button
-                                onClick={() => {
-                                    setMode("placing");
-                                    setNewBuilding({ name: "", code: "", number: buildings.length + 1 });
-                                    setPendingCoords(null);
-                                }}
-                                className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-lg text-sm font-bold hover:bg-primary/90 transition-colors shadow-sm"
-                            >
-                                <span className="material-symbols-outlined text-[18px]">add_location_alt</span>
-                                Place Building
-                            </button>
-                        ) : masterPlanImageUrl && mode === "placing" ? (
-                            <button
-                                onClick={() => { setMode("view"); setPendingCoords(null); }}
+                                onClick={() => { setMode("view"); setPendingCoords(null); setPendingPolygon(null); }}
                                 className="flex items-center gap-2 px-4 py-2 text-neutral-600 dark:text-neutral-400 bg-neutral-100 dark:bg-neutral-800 rounded-lg text-sm font-bold hover:bg-neutral-200 transition-colors"
                             >
                                 <span className="material-symbols-outlined text-[18px]">close</span>
@@ -275,116 +377,143 @@ export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, 
                     </div>
                 ) : (
                     <>
-                        {/* Plan Viewer */}
-                        <div className={`flex-1 relative isolate rounded-xl border-2 overflow-hidden bg-neutral-100 dark:bg-neutral-800 shadow-inner ${mode === "placing" ? "border-primary border-dashed cursor-crosshair" : "border-neutral-200 dark:border-neutral-700 cursor-move"}`}>
-                            <TransformWrapper
-                                initialScale={1} minScale={0.5} maxScale={4} centerOnInit={true}
-                                doubleClick={{ disabled: true }}
-                                panning={{ disabled: mode === "placing" }}
-                                onTransformed={(_ref, state) => setZoomScale(state.scale)}
+                        <div
+                            ref={planContainerRef}
+                            className={`flex-1 relative isolate rounded-xl border-2 bg-neutral-100 dark:bg-neutral-800 shadow-inner ${(mode === "placing" || mode === "drawing") ? "border-primary border-dashed cursor-crosshair" : "border-neutral-200 dark:border-neutral-700 cursor-move"}`}
+                            style={{ overflow: "hidden" }}
+                        >
+                            {/* Layer 1: Image — panzoom transforms ONLY this element */}
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                                ref={imgRef}
+                                id="admin-plan-image"
+                                src={masterPlanImageUrl}
+                                alt="Master Plan"
+                                className="w-full h-full object-contain select-none"
+                                draggable={false}
+                                decoding="async"
+                                style={{ imageRendering, transformOrigin: "50% 50%" }}
+                            />
+
+                            {/* Layer 2: Overlay — synced via DOM ref (zero React re-renders) */}
+                            <div
+                                ref={overlayRef}
+                                className="absolute inset-0 w-full h-full"
+                                style={{ transformOrigin: "50% 50%", pointerEvents: "none" }}
+                                onClick={handlePlanClick}
                             >
-                                {({ zoomIn, zoomOut }) => (
-                                    <>
-                                        <TransformComponent wrapperStyle={{ width: "100%", height: "100%" }}>
-                                            <div
-                                                ref={planContainerRef}
-                                                className="relative inline-block w-full h-full min-h-[500px] min-w-[700px]"
-                                                onClick={handlePlanClick}
+                                {/* Building markers */}
+                                {buildings.map((b) => {
+                                    const count = commitmentCounts[b._id] || 0;
+                                    const isSelected = selectedBuilding === b._id;
+
+                                    return (
+                                        <div
+                                            key={b._id}
+                                            data-building-marker
+                                            className="absolute z-10 hover:z-50 group"
+                                            style={{
+                                                top: `${b.coordinates.yPercent}%`,
+                                                left: `${b.coordinates.xPercent}%`,
+                                                transform: `translate(-50%, -50%) scale(${1 / Math.max(zoomScale, 1)})`,
+                                                pointerEvents: "auto",
+                                            }}
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                if (mode === "view") setSelectedBuilding(isSelected ? null : b._id);
+                                            }}
+                                        >
+                                            {isSelected && (
+                                                <div className="absolute inset-0 rounded-full bg-primary/30 animate-ping" />
+                                            )}
+                                            <div className={`relative flex items-center justify-center rounded-full shadow-md cursor-pointer transition-all font-bold
+                                                ${showCount ? "size-4 text-[8px] border-[1px]" : "size-1 border-[0.5px]"}
+                                                ${isSelected
+                                                    ? "bg-primary text-white border-white scale-125 ring-2 ring-primary/30"
+                                                    : "bg-white dark:bg-neutral-800 text-neutral-900 dark:text-white border-primary/60 hover:scale-[3] hover:ring-1 hover:ring-primary/20"
+                                                }`}
                                             >
-                                                {/* eslint-disable-next-line @next/next/no-img-element */}
-                                                <img
-                                                    id="admin-plan-image"
-                                                    src={masterPlanImageUrl}
-                                                    alt="Master Plan"
-                                                    className="w-full h-full object-cover"
-                                                    draggable={false}
-                                                />
-
-                                                {/* Building markers — small dots, count visible at high zoom */}
-                                                {buildings.map((b) => {
-                                                    const count = commitmentCounts[b._id] || 0;
-                                                    const isSelected = selectedBuilding === b._id;
-
-                                                    return (
-                                                        <div
-                                                            key={b._id}
-                                                            data-building-marker
-                                                            className="absolute z-10 hover:z-50 group"
-                                                            style={{
-                                                                top: `${b.coordinates.yPercent}%`,
-                                                                left: `${b.coordinates.xPercent}%`,
-                                                                transform: "translate(-50%, -50%)",
-                                                            }}
-                                                            onClick={(e) => {
-                                                                e.stopPropagation();
-                                                                if (mode === "view") setSelectedBuilding(isSelected ? null : b._id);
-                                                            }}
-                                                        >
-                                                            {/* Pulse ring */}
-                                                            {isSelected && (
-                                                                <div className="absolute inset-0 rounded-full bg-primary/30 animate-ping" />
-                                                            )}
-
-                                                            {/* Main circle — small by default, shows count at high zoom */}
-                                                            <div className={`relative flex items-center justify-center rounded-full shadow-lg border-2 cursor-pointer transition-all font-bold
-                                                        ${showCount ? "size-8 text-xs" : "size-4"}
-                                                        ${isSelected
-                                                                    ? "bg-primary text-white border-white scale-125 ring-4 ring-primary/30"
-                                                                    : "bg-white dark:bg-neutral-800 text-neutral-900 dark:text-white border-primary/60 hover:scale-125 hover:ring-2 hover:ring-primary/20"
-                                                                }`}
-                                                            >
-                                                                {showCount && count}
-                                                            </div>
-
-                                                            {/* Tooltip — visible on hover, now above siblings via hover:z-50 */}
-                                                            <div className="absolute left-1/2 -translate-x-1/2 -top-8 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap">
-                                                                <div className="bg-neutral-900 text-white text-[10px] font-bold px-2 py-0.5 rounded shadow-lg">
-                                                                    {b.name} ({b.code})
-                                                                </div>
-                                                            </div>
-                                                        </div>
-                                                    );
-                                                })}
-
-                                                {/* Pending placement marker */}
-                                                {mode === "placing" && pendingCoords && (
-                                                    <div
-                                                        className="absolute z-20"
-                                                        style={{
-                                                            top: `${pendingCoords.y}%`,
-                                                            left: `${pendingCoords.x}%`,
-                                                            transform: "translate(-50%, -50%)",
-                                                        }}
-                                                    >
-                                                        <div className="relative flex items-center justify-center size-6 rounded-full bg-emerald-500 text-white border-2 border-white shadow-xl animate-bounce">
-                                                            <span className="material-symbols-outlined text-[14px]">add</span>
-                                                        </div>
-                                                    </div>
-                                                )}
+                                                {showCount && count}
                                             </div>
-                                        </TransformComponent>
-
-                                        {/* Zoom controls */}
-                                        <div className="absolute bottom-4 right-4 flex flex-col gap-1.5 bg-white/90 dark:bg-neutral-900/90 backdrop-blur rounded-lg shadow-md p-1 border border-neutral-200 dark:border-neutral-700 z-10">
-                                            <button onClick={() => zoomIn()} className="p-1.5 text-neutral-600 dark:text-neutral-300 hover:text-primary hover:bg-neutral-100 dark:hover:bg-neutral-800 rounded transition-colors">
-                                                <span className="material-symbols-outlined text-[18px]">add</span>
-                                            </button>
-                                            <button onClick={() => zoomOut()} className="p-1.5 text-neutral-600 dark:text-neutral-300 hover:text-primary hover:bg-neutral-100 dark:hover:bg-neutral-800 rounded transition-colors">
-                                                <span className="material-symbols-outlined text-[18px]">remove</span>
-                                            </button>
+                                            <div className="absolute left-1/2 -translate-x-1/2 -top-6 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap">
+                                                <div className="bg-neutral-900 text-white text-[9px] font-bold px-1.5 py-0.5 rounded shadow-lg">
+                                                    {b.name} ({b.code})
+                                                </div>
+                                            </div>
                                         </div>
-                                    </>
+                                    );
+                                })}
+
+                                {/* Pending placement */}
+                                {mode === "placing" && pendingCoords && (
+                                    <div
+                                        className="absolute z-20"
+                                        style={{
+                                            top: `${pendingCoords.y}%`,
+                                            left: `${pendingCoords.x}%`,
+                                            transform: `translate(-50%, -50%) scale(${1 / Math.max(zoomScale, 1)})`,
+                                            pointerEvents: "auto",
+                                        }}
+                                    >
+                                        <div className="relative flex items-center justify-center size-3 rounded-full bg-emerald-500 text-white border border-white shadow-xl animate-bounce">
+                                            <span className="material-symbols-outlined text-[8px]">add</span>
+                                        </div>
+                                    </div>
                                 )}
-                            </TransformWrapper>
+
+                                {/* Free-draw overlay */}
+                                <FreeDrawOverlay
+                                    isDrawing={mode === "drawing"}
+                                    drawColor="#2563EB"
+                                    existingPolygons={buildings
+                                        .filter(b => b.polygon && b.polygon.length >= 3)
+                                        .map((b, idx) => ({
+                                            id: b._id,
+                                            points: b.polygon!,
+                                            color: ["#8B5CF6", "#3B82F6", "#F59E0B", "#10B981"][idx % 4],
+                                            label: `${b.name} (${b.code})`,
+                                            onClick: () => { if (mode === "view") setSelectedBuilding(b._id); },
+                                        }))
+                                    }
+                                    onDrawComplete={(polygon, centroid) => {
+                                        setPendingPolygon(polygon);
+                                        setPendingCoords({ x: centroid.xPercent, y: centroid.yPercent });
+                                    }}
+                                />
+
+                                {/* Pixel grid */}
+                                <PixelGridOverlay zoomScale={zoomScale} />
+                            </div>
+
+                            {/* Zoom controls — outside transforms */}
+                            <div className="absolute bottom-4 right-4 flex flex-col gap-1 bg-white/90 dark:bg-neutral-900/90 backdrop-blur rounded-lg shadow-md p-0.5 border border-neutral-200 dark:border-neutral-700 z-10">
+                                <button onClick={handleZoomIn} className="p-1.5 hover:bg-neutral-100 dark:hover:bg-neutral-800 rounded transition-colors" title="Zoom In">
+                                    <span className="material-symbols-outlined text-neutral-600 dark:text-neutral-300 text-[16px]">add</span>
+                                </button>
+                                <button onClick={handleReset} className="p-1.5 hover:bg-neutral-100 dark:hover:bg-neutral-800 rounded transition-colors" title="Fit">
+                                    <span className="material-symbols-outlined text-neutral-600 dark:text-neutral-300 text-[16px]">fit_screen</span>
+                                </button>
+                                <button onClick={handleZoomOut} className="p-1.5 hover:bg-neutral-100 dark:hover:bg-neutral-800 rounded transition-colors" title="Zoom Out">
+                                    <span className="material-symbols-outlined text-neutral-600 dark:text-neutral-300 text-[16px]">remove</span>
+                                </button>
+                            </div>
+
+                            {/* Zoom % badge */}
+                            <div className="absolute bottom-4 left-4 z-10 bg-neutral-900/80 text-white text-[10px] font-mono px-1.5 py-0.5 rounded select-none">
+                                {Math.round(zoomScale * 100)}%
+                            </div>
                         </div>
 
-                        {/* Placing mode: form below the plan */}
-                        {mode === "placing" && pendingCoords && (
+                        {/* Placing/Drawing mode: form below the plan */}
+                        {(mode === "placing" || mode === "drawing") && pendingCoords && (
                             <div className="bg-white dark:bg-neutral-900 border border-emerald-200 dark:border-emerald-800 rounded-xl p-5 shadow-sm">
                                 <div className="flex items-center gap-2 mb-3">
-                                    <span className="material-symbols-outlined text-emerald-500 text-[18px]">location_on</span>
+                                    <span className="material-symbols-outlined text-emerald-500 text-[18px]">{mode === "drawing" ? "draw" : "location_on"}</span>
                                     <span className="text-sm font-bold text-neutral-900 dark:text-white">
-                                        New Building at ({pendingCoords.x.toFixed(1)}%, {pendingCoords.y.toFixed(1)}%)
+                                        {mode === "drawing"
+                                            ? `New Building Zone (${pendingPolygon?.length || 0} points)`
+                                            : `New Building at (${pendingCoords.x.toFixed(1)}%, ${pendingCoords.y.toFixed(1)}%)`
+                                        }
                                     </span>
                                 </div>
                                 <div className="grid grid-cols-3 gap-3 mb-3">
@@ -403,9 +532,9 @@ export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, 
                                         className="px-4 py-2 bg-emerald-500 text-white rounded-lg text-sm font-bold hover:bg-emerald-600 transition-colors disabled:opacity-50 shadow-sm">
                                         Create Building
                                     </button>
-                                    <button onClick={() => { setPendingCoords(null); }}
+                                    <button onClick={() => { setPendingCoords(null); setPendingPolygon(null); }}
                                         className="px-4 py-2 text-neutral-600 hover:bg-neutral-100 dark:hover:bg-neutral-800 rounded-lg text-sm font-medium transition-colors">
-                                        Clear Pin
+                                        {mode === "drawing" ? "Clear Drawing" : "Clear Pin"}
                                     </button>
                                 </div>
                             </div>

@@ -56,7 +56,13 @@ export async function handleUserProjectAccess(
 
 export async function createBuilding(
     projectId: string,
-    data: { name: string; code: string; number: number; coordinates: { xPercent: number; yPercent: number } }
+    data: {
+        name: string;
+        code: string;
+        number: number;
+        coordinates: { xPercent: number; yPercent: number };
+        polygon?: Array<{ xPercent: number; yPercent: number }>;
+    }
 ) {
     const session = await auth();
     if (!session?.user || !isManagerRole(session.user.role)) {

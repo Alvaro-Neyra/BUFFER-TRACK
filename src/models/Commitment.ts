@@ -15,6 +15,8 @@ export interface ICommitment extends Document {
         xPercent: number;
         yPercent: number;
     };
+    // Optional free-draw polygon zone (array of percentage-based points)
+    polygon?: Array<{ xPercent: number; yPercent: number }>;
     dates: {
         requestDate: Date;
         targetDate?: Date;
@@ -47,6 +49,12 @@ const CommitmentSchema: Schema = new Schema(
             xPercent: { type: Number, required: true, min: 0, max: 100 },
             yPercent: { type: Number, required: true, min: 0, max: 100 },
         },
+        // Optional: free-draw polygon zone for activity areas on floor plans.
+        // The `coordinates` field holds the centroid for pin/label placement.
+        polygon: [{
+            xPercent: { type: Number, min: 0, max: 100 },
+            yPercent: { type: Number, min: 0, max: 100 },
+        }],
         dates: {
             requestDate: { type: Date, required: true, default: Date.now },
             targetDate: { type: Date },
