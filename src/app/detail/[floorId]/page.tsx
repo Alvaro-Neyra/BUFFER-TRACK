@@ -1,0 +1,55 @@
+import React from "react";
+import { auth } from "@/lib/auth";
+import { redirect } from "next/navigation";
+import connectToDatabase from "@/lib/mongodb";
+import { getFloorData, getFloorCommitments, getSpecialtiesWithUsers } from "./actions";
+import { DetailPlanView } from "./DetailPlanView";
+
+export default async function DetailPlanPage({
+    params,
+}: {
+    params: { floorId: string };
+}) {
+    const session = await auth();
+    if (!session?.user) {
+        redirect("/login");
+    }
+
+    const hasActiveProject = session.user.projects?.some(p => p.status === "Active");
+    if (!hasActiveProject) {
+        redirect("/dashboard");
+    }
+
+    await connectToDatabase();
+
+    // Fetch floor data
+    const floorData = await getFloorData(params.floorId);
+    if (!floorData) {
+        redirect("/");
+    }
+
+    // Fetch data in parallel
+    const [commitments, { specialties, users }] = await Promise.all([
+        getFloorCommitments(params.floorId),
+        getSpecialtiesWithUsers(floorData.projectId),
+    ]);
+
+    // Compute current week start (Monday)
+    const today = new Date();
+    const currentDay = today.getDay();
+    const diff = today.getDate() - currentDay + (currentDay === 0 ? -6 : 1);
+    const monday = new Date(today);
+    monday.setDate(diff);
+    monday.setHours(0, 0, 0, 0);
+
+    return (
+        <DetailPlanView
+            floorData={floorData}
+            commitments={commitments}
+            specialties={specialties}
+            users={users}
+            weekStart={monday.toISOString()}
+            currentUserId={session.user.id || ""}
+        />
+    );
+}
