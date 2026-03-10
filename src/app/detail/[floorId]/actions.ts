@@ -43,6 +43,9 @@ export async function getFloorCommitments(floorId: string) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return commitments.map((c: any) => ({
         _id: c._id.toString(),
+        customId: c.customId || "",
+        location: c.location || "",
+        name: c.name || "",
         description: c.description || "",
         status: c.status as string,
         specialtyId: c.specialtyId?._id?.toString() || "",
@@ -54,6 +57,7 @@ export async function getFloorCommitments(floorId: string) {
         requesterId: c.requesterId?._id?.toString() || c.requesterId?.toString() || "",
         requesterName: c.requesterId?.name || "Unknown",
         coordinates: { xPercent: c.coordinates.xPercent, yPercent: c.coordinates.yPercent },
+        startDate: c.dates?.startDate?.toISOString() || null,
         targetDate: c.dates?.targetDate?.toISOString() || null,
         requestDate: c.dates?.requestDate?.toISOString() || null,
         weekStart: c.weekStart?.toISOString() || null,
@@ -155,5 +159,47 @@ export async function updateCommitmentStatus(commitmentId: string, status: strin
     } catch (error) {
         console.error("Failed to update commitment:", error);
         return { success: false, error: "Failed to update status" };
+    }
+}
+
+export async function updateCommitmentDetails(
+    commitmentId: string,
+    data: {
+        startDate?: string | null;
+        targetDate?: string | null;
+        status?: string;
+    },
+    floorId: string
+) {
+    const session = await auth();
+    if (!session?.user) return { success: false, error: "Unauthorized" };
+
+    await connectToDatabase();
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const updatePayload: Record<string, any> = {};
+    if (data.status) updatePayload.status = data.status;
+
+    const existing = await CommitmentRepository.findById(commitmentId);
+    if (!existing) return { success: false, error: "Not found" };
+
+    updatePayload.dates = {
+        ...(existing.dates || {}),
+    };
+    if (data.startDate !== undefined) {
+        updatePayload.dates.startDate = data.startDate ? new Date(data.startDate) : undefined;
+    }
+    if (data.targetDate !== undefined) {
+        updatePayload.dates.targetDate = data.targetDate ? new Date(data.targetDate) : undefined;
+    }
+
+    try {
+        await CommitmentRepository.update(commitmentId, updatePayload);
+        revalidatePath(`/detail/${floorId}`);
+        revalidatePath(`/manage-project`);
+        return { success: true };
+    } catch (error) {
+        console.error("Failed to update commitment details:", error);
+        return { success: false, error: "Failed to update details" };
     }
 }
