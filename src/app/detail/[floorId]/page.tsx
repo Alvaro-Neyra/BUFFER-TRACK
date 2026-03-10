@@ -35,19 +35,9 @@ export default async function DetailPlanPage({
         getSpecialtiesWithUsers(floorData.projectId),
     ]);
 
-    // Compute current week start (Monday)
-    const today = new Date();
-
-    // Filter commitments based on user role (Admin or the requester should see everything they created)
     const filteredCommitments = session.user.role === "Admin" || session.user.role === "Project Manager" || session.user.role === "Project Director"
         ? commitments
         : commitments.filter(c => c.assignedToId === session.user.id || c.requesterId === session.user.id);
-
-    const currentDay = today.getDay();
-    const diff = today.getDate() - currentDay + (currentDay === 0 ? -6 : 1);
-    const monday = new Date(today);
-    monday.setDate(diff);
-    monday.setHours(0, 0, 0, 0);
 
     return (
         <DetailPlanView
@@ -55,7 +45,6 @@ export default async function DetailPlanPage({
             commitments={filteredCommitments}
             specialties={specialties}
             users={users}
-            weekStart={monday.toISOString()}
             currentUserId={session.user.id || ""}
         />
     );
