@@ -25,15 +25,21 @@ export interface ISerializedCommitment {
     _id: string;
     buildingName: string;
     buildingCode: string;
+    floorId: string;
     floorLabel: string;
+    name: string;
+    description: string;
+    specialtyId: string;
     specialtyName: string;
     specialtyColor: string;
+    assignedToId: string;
     assignedToName: string;
     requesterName: string;
     status: string;
     targetDate: string | null;
     requestDate: string | null;
     coordinates: { xPercent: number; yPercent: number };
+    polygon?: { xPercent: number; yPercent: number }[];
 }
 
 export interface ISerializedSpecialty {
@@ -86,7 +92,7 @@ export function ManageProjectView({
                                     </span>
                                 )}
                                 {activeTab === tab.key && (
-                                    <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary rounded-t" />
+                                    <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary rounded-t-md" />
                                 )}
                             </button>
                         ))}
@@ -108,6 +114,9 @@ export function ManageProjectView({
                             currentProjectId={currentProjectId}
                             masterPlanImageUrl={masterPlanImageUrl}
                             commitmentCounts={commitmentCounts}
+                            commitments={commitments}
+                            specialties={specialties}
+                            activeUsers={activeUsers}
                         />
                     )}
                     {activeTab === "activities" && (

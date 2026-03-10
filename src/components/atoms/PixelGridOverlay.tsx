@@ -31,7 +31,7 @@ export function PixelGridOverlay({
 
     return (
         <div
-            className="absolute inset-0 pointer-events-none z-[5]"
+            className="absolute inset-0 pointer-events-none z-5"
             style={{
                 opacity,
                 backgroundImage: `

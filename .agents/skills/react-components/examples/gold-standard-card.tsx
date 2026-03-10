@@ -45,7 +45,7 @@ export const ActivityCard: React.FC<ActivityCardProps> = ({
     <div className="flex items-center justify-between gap-4 rounded-lg bg-surface-dark p-4 min-h-14 shadow-sm ring-1 ring-white/10">
       <div className="flex items-center gap-4 overflow-hidden">
         <div
-          className="aspect-square h-10 w-10 flex-shrink-0 rounded-full bg-cover bg-center bg-no-repeat"
+          className="aspect-square h-10 w-10 shrink-0 rounded-full bg-cover bg-center bg-no-repeat"
           style={{ backgroundImage: `url(${avatarUrl})` }}
           aria-label={`Avatar for ${username}`}
         />

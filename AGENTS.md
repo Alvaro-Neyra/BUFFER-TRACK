@@ -71,7 +71,7 @@ npm run build
 | Database | **MongoDB 7+** | Via Mongoose 8+ |
 | Auth | **NextAuth.js v5** | JWT strategy |
 | Real-time | **Socket.io** | Pin state sync |
-| Plan zoom/pan | **react-zoom-pan-pinch** | 300 DPI image support |
+| Plan zoom/pan | **Pixi.js (WebGL)** | Legacy views use @panzoom/panzoom, migrating all to PixiJS for zero-lag |
 | File storage | **Google Cloud Storage** | JPG/WebP 300 DPI floor plans |
 | Validation | **Zod** | All API inputs |
 | Global state | **Zustand** | Client-side only |
@@ -307,8 +307,7 @@ NEXT_PUBLIC_SOCKET_URL=
 
 ## 📌 Critical Agent Notes
 
-- **`PlanViewer`** is the most critical component — must handle 300 DPI images with smooth
-  zoom using `react-zoom-pan-pinch`
+- **`MasterPlanViewer` and `PlanViewer`** are critical components — must handle 300 DPI images with smooth, zero-lag zoom using **PixiJS (WebGL)** instead of heavy DOM manipulation.
 - Pins use **percentage coordinates (X%, Y%)** — this ensures responsiveness across
   all screen sizes and zoom levels
 - PPC calculation must be **server-side** for consistency

@@ -11,6 +11,7 @@ export interface IBuilding extends Document {
     };
     // Optional free-draw polygon zone (array of percentage-based points)
     polygon?: Array<{ xPercent: number; yPercent: number }>;
+    color?: string; // Hex color for the building marker
     createdAt: Date;
     updatedAt: Date;
 }
@@ -35,6 +36,7 @@ const BuildingSchema: Schema = new Schema(
             xPercent: { type: Number, min: 0, max: 100 },
             yPercent: { type: Number, min: 0, max: 100 },
         }],
+        color: { type: String }, // Optional hex color
     },
     { timestamps: true }
 );

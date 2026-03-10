@@ -59,6 +59,18 @@ export class CommitmentRepository {
         );
     }
 
+    /** Update a commitment fully. */
+    static async update(id: string, payload: Record<string, unknown>): Promise<ICommitment | null> {
+        await this.connect();
+        return Commitment.findByIdAndUpdate(id, payload, { returnDocument: 'after' }).lean() as Promise<ICommitment | null>;
+    }
+
+    /** Delete a commitment by ID. */
+    static async delete(id: string): Promise<void> {
+        await this.connect();
+        await Commitment.findByIdAndDelete(id);
+    }
+
     /** Find commitments for a specific floor. */
     static async findByFloorId(floorId: string): Promise<ICommitment[]> {
         await this.connect();

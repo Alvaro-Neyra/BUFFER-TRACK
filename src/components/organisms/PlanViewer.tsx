@@ -1,12 +1,21 @@
-"use client";
-
 // ------------------------------------------------------------------
 // PlanViewer — High-performance WebGL floor plan viewer
 // Uses PixiJS (WebGL) for the image and keeps DOM overlay for pins.
 // ------------------------------------------------------------------
 
-import React, { useRef, useEffect, useCallback, useState } from "react";
-import { Stage, Container, Sprite } from "@pixi/react";
+"use client";
+
+import React, {
+    useRef,
+    useEffect,
+    useCallback,
+    useState,
+    useMemo,
+} from "react";
+import { Application, extend } from "@pixi/react";
+import { Container, Sprite, Texture } from "pixi.js";
+
+extend({ Container, Sprite });
 
 interface IPlanViewerProps {
     imageUrl: string;
@@ -20,6 +29,7 @@ const MAX_SCALE = 8;
 export const PlanViewer = ({ imageUrl, children, onMapClick }: Readonly<IPlanViewerProps>) => {
     const containerRef = useRef<HTMLDivElement>(null);
     const overlayRef = useRef<HTMLDivElement>(null);
+    const texture = useMemo(() => Texture.from(imageUrl), [imageUrl]);
 
     const [viewport, setViewport] = useState({ width: 0, height: 0 });
     const [view, setView] = useState({ scale: 1, x: 0, y: 0 });
@@ -166,24 +176,22 @@ export const PlanViewer = ({ imageUrl, children, onMapClick }: Readonly<IPlanVie
             onPointerLeave={handlePointerLeave}
         >
             {viewport.width > 0 && viewport.height > 0 && (
-                <Stage
+                <Application
                     className="absolute inset-0"
                     width={viewport.width}
                     height={viewport.height}
-                    options={{
-                        backgroundAlpha: 0,
-                        antialias: true,
-                        resolution: dpr,
-                    }}
+                    backgroundAlpha={0}
+                    antialias={true}
+                    resolution={dpr}
                 >
-                    <Container x={view.x} y={view.y} scale={view.scale}>
-                        <Sprite
-                            image={imageUrl}
+                    <pixiContainer x={view.x} y={view.y} scale={view.scale}>
+                        <pixiSprite
+                            texture={texture}
                             width={viewport.width}
                             height={viewport.height}
                         />
-                    </Container>
-                </Stage>
+                    </pixiContainer>
+                </Application>
             )}
 
             <div

@@ -25,22 +25,21 @@ export interface ICompressionResult {
 const MAX_UPLOAD_SIZE = 50 * 1024 * 1024; // 50MB after compression
 
 /**
- * Maximum dimension (width or height) for the viewer image.
- * - 2048px is the sweet spot: enough detail for 50× zoom on a 1920×1080 screen,
- *   while keeping the pixel count under ~4M (2048×1536) for smooth GPU compositing.
- * - For reference: 4000×3000 = 12M pixels → GPU struggles on integrated graphics.
- *   2048×1536 = 3.1M pixels → smooth on virtually any device.
+ * Maximum dimension for WebGL textures (PixiJS/Browser limits).
+ * - Most modern devices (phones and desktops) cap WebGL MAX_TEXTURE_SIZE at 8192px.
+ * - Any image larger than this will render as a pure black box in WebGL.
+ * - 8192x8192 handles incredible detail while preventing canvas/memory crashes.
  */
-const MAX_VIEWER_DIMENSION = 2048;
+const MAX_WEBGL_DIMENSION = 8192;
 
 /**
  * Compress an image file client-side using the Canvas API.
  *
  * Strategy:
  * 1. ALWAYS load the image and check dimensions
- * 2. If larger than MAX_VIEWER_DIMENSION → downscale preserving aspect ratio
- * 3. Compress using JPEG/WebP quality steps if needed
- * 4. If already small + within dimensions → return as-is
+ * 2. If larger than MAX_WEBGL_DIMENSION → downscale to avoid WebGL black-screen limits
+ * 3. Compress using JPEG/WebP quality steps
+ * 4. Return the WebGL-compatible image
  *
  * @param file - The original image File
  * @returns The compression result or throws with a user-friendly message
@@ -62,10 +61,10 @@ export async function compressImage(file: File): Promise<ICompressionResult> {
     const img = await loadImage(file);
     const { naturalWidth: w, naturalHeight: h } = img;
 
-    const needsDownscale = w > MAX_VIEWER_DIMENSION || h > MAX_VIEWER_DIMENSION;
+    const needsDownscale = w > MAX_WEBGL_DIMENSION || h > MAX_WEBGL_DIMENSION;
     const needsCompress = originalSize > MAX_UPLOAD_SIZE;
 
-    // ── Fast path: small file + small dimensions → return as-is ──
+    // ── Fast path: small file → return as-is ──
     if (!needsDownscale && !needsCompress) {
         URL.revokeObjectURL(img.src);
         return {
@@ -81,8 +80,9 @@ export async function compressImage(file: File): Promise<ICompressionResult> {
     let targetW = w;
     let targetH = h;
 
+    // We must strictly enforce WebGL max dimensions
     if (needsDownscale) {
-        const scale = Math.min(MAX_VIEWER_DIMENSION / w, MAX_VIEWER_DIMENSION / h);
+        const scale = Math.min(MAX_WEBGL_DIMENSION / w, MAX_WEBGL_DIMENSION / h);
         targetW = Math.round(w * scale);
         targetH = Math.round(h * scale);
     }

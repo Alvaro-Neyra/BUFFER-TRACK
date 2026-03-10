@@ -9,6 +9,7 @@ export interface ICommitment extends Document {
     specialtyId: mongoose.Types.ObjectId;
     requesterId: mongoose.Types.ObjectId;
     assignedTo?: mongoose.Types.ObjectId;
+    name: string;
     description: string;
     status: TPinStatus;
     coordinates: {
@@ -38,7 +39,8 @@ const CommitmentSchema: Schema = new Schema(
         specialtyId: { type: Schema.Types.ObjectId, ref: 'Specialty', required: true, index: true },
         requesterId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
         assignedTo: { type: Schema.Types.ObjectId, ref: 'User', index: true },
-        description: { type: String, required: true },
+        name: { type: String, required: true },
+        description: { type: String },
         status: {
             type: String,
             enum: ['Request', 'Notified', 'Committed', 'In Progress', 'Completed', 'Delayed', 'Restricted'],

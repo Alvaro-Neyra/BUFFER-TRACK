@@ -1,13 +1,11 @@
-import { GlobalHeader } from "@/components/organisms/GlobalHeader";
-import { ProjectKPIs } from "@/components/organisms/ProjectKPIs";
-import { PendingTasksSidebar } from "@/components/organisms/PendingTasksSidebar";
-import { MasterPlanViewer } from "@/components/organisms/MasterPlanViewer";
 import { PendingAccessView } from "@/components/organisms/PendingAccessView";
 import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import connectToDatabase from "@/lib/mongodb";
 import { ProjectService } from "@/services/project.service";
 import { ProjectRepository } from "@/repositories/project.repository";
+import { CommitmentRepository } from "@/repositories/commitment.repository";
+import { MasterPlanPage } from "@/components/organisms/MasterPlanPage";
 
 export default async function Home() {
   const session = await auth();
@@ -22,41 +20,41 @@ export default async function Home() {
 
   await connectToDatabase();
 
-  // Fetch buildings and project in parallel
-  const [serializedBuildings, project] = await Promise.all([
+  const [serializedBuildings, project, rawCommitments] = await Promise.all([
     ProjectService.getBuildingsForMasterPlan(),
     ProjectRepository.findById(activeProject.projectId),
+    CommitmentRepository.findByProjectPopulated(activeProject.projectId),
   ]);
 
-  const masterPlanImageUrl = project?.masterPlanImageUrl || "";
+  // Filter commitments based on user role (Admin or the requester should see everything they created)
+  const isManager = session.user.role === "Admin" || session.user.role === "Project Manager" || session.user.role === "Project Director";
+  const filteredCommitments = isManager
+    ? rawCommitments
+    : rawCommitments.filter(c =>
+      (c.assignedTo && c.assignedTo._id && c.assignedTo._id.toString() === session.user.id) ||
+      (c.requesterId && c.requesterId._id && c.requesterId._id.toString() === session.user.id)
+    );
+
+  const serializedCommitments = filteredCommitments.map(c => ({
+    _id: c._id.toString(),
+    name: c.name || c.description || "Unnamed Activity",
+    status: c.status,
+    specialtyName: (c.specialtyId as any)?.name || "Unknown",
+    specialtyColor: (c.specialtyId as any)?.colorHex || "#8B5CF6",
+    assignedToName: (c.assignedTo as any)?.name || "Unassigned",
+    buildingCode: (c.buildingId as any)?.code || "",
+    buildingId: (c.buildingId as any)?._id?.toString() || "",
+    floorLabel: (c.floorId as any)?.label || "",
+    floorId: (c.floorId as any)?._id?.toString() || "",
+    isOverdue: false, // Implement logic if needed later
+    createdAt: c.createdAt ? new Date(c.createdAt).toISOString() : new Date().toISOString(),
+  }));
 
   return (
-    <div className="flex flex-col h-full w-full">
-      <GlobalHeader showSearch={true} showLinks={true} />
-      <ProjectKPIs />
-
-      <div className="flex flex-1 overflow-hidden">
-        <div className="flex flex-col flex-1 overflow-y-auto p-4 lg:p-6 border-r border-neutral-200 dark:border-neutral-800">
-          <div className="flex flex-wrap justify-between items-end gap-4 mb-4">
-            <h1 className="text-neutral-900 dark:text-white text-2xl font-black leading-tight tracking-tight">Master Plan Overview</h1>
-          </div>
-
-          {masterPlanImageUrl ? (
-            <MasterPlanViewer
-              imageUrl={masterPlanImageUrl}
-              buildings={serializedBuildings}
-            />
-          ) : (
-            <div className="flex-1 flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 min-h-[400px]">
-              <span className="material-symbols-outlined text-5xl text-neutral-300 mb-3">map</span>
-              <p className="text-sm font-medium text-neutral-500">No master plan image uploaded yet</p>
-              <p className="text-xs text-neutral-400 mt-1">Go to Manage Project → Buildings to upload one</p>
-            </div>
-          )}
-        </div>
-
-        <PendingTasksSidebar />
-      </div>
-    </div>
+    <MasterPlanPage
+      masterPlanImageUrl={project?.masterPlanImageUrl || ""}
+      buildings={serializedBuildings}
+      commitments={serializedCommitments}
+    />
   );
 }

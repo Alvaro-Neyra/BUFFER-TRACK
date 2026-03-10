@@ -48,7 +48,7 @@ export const GlobalHeader = ({ title, showSearch = false, showLinks = false }: R
                 </Link>
 
                 {showSearch && (
-                    <label className="flex flex-col min-w-40 !h-10 max-w-64 hidden md:flex">
+                    <label className="flex flex-col min-w-40 h-10! max-w-64 md:flex">
                         <div className="flex w-full flex-1 items-stretch rounded-md h-full">
                             <div className="text-neutral-500 flex border-none bg-neutral-100 dark:bg-neutral-800 items-center justify-center pl-4 rounded-l-md border-r-0">
                                 <span className="material-symbols-outlined">search</span>
@@ -69,7 +69,7 @@ export const GlobalHeader = ({ title, showSearch = false, showLinks = false }: R
 
             <div className="flex items-center gap-3 md:gap-4 flex-wrap">
                 {showLinks && (
-                    <nav className="flex items-center gap-6 hidden lg:flex mr-4">
+                    <nav className="flex items-center gap-6 md:flex mr-4">
                         {[
                             { label: "Dashboard", href: "/dashboard" },
                             { label: "Master Plan", href: "/" },

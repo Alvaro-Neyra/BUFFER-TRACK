@@ -3,24 +3,32 @@
 import React, { useState, useTransition, useRef, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
-import Panzoom from "@panzoom/panzoom";
-import { createBuilding, updateBuilding, deleteBuilding, createFloor, deleteFloor, updateMasterPlanImage } from "../actions";
+import { createBuilding, updateBuilding, deleteBuilding, createFloor, deleteFloor, updateMasterPlanImage, createCommitment, updateCommitment, deleteCommitment } from "../actions";
 import { compressImage, formatFileSize } from "@/lib/compressImage";
-import { FreeDrawOverlay } from "@/components/organisms/FreeDrawOverlay";
+import dynamic from "next/dynamic";
+
+const InteractivePlanViewer = dynamic(
+    () => import("@/components/organisms/InteractivePlanViewer").then((mod) => mod.InteractivePlanViewer),
+    { ssr: false }
+);
 import type { IPercentPoint } from "@/components/organisms/FreeDrawOverlay";
-import { PixelGridOverlay } from "@/components/atoms/PixelGridOverlay";
 import type { IBuildingWithFloors } from "@/services/project.service";
+import type { ISerializedCommitment, ISerializedSpecialty } from "../ManageProjectView";
+import type { IUserDTO } from "@/types/models";
 
 interface IBuildingsTabProps {
     buildings: IBuildingWithFloors[];
     currentProjectId: string;
     masterPlanImageUrl: string;
     commitmentCounts: Record<string, number>; // buildingId → count
+    commitments: ISerializedCommitment[];
+    specialties: ISerializedSpecialty[];
+    activeUsers: IUserDTO[];
 }
 
 type TMode = "view" | "placing" | "drawing";
 
-export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, commitmentCounts }: IBuildingsTabProps) {
+export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, commitmentCounts, commitments, specialties, activeUsers }: IBuildingsTabProps) {
     const router = useRouter();
     const [isPending, startTransition] = useTransition();
     const planContainerRef = useRef<HTMLDivElement>(null);
@@ -32,15 +40,27 @@ export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, 
     const [selectedBuilding, setSelectedBuilding] = useState<string | null>(null);
     const [uploadingMasterPlan, setUploadingMasterPlan] = useState(false);
     const [compressionInfo, setCompressionInfo] = useState<string | null>(null);
+    const [showPlaceOptions, setShowPlaceOptions] = useState(false);
+
+    // Navigation state
+    const [selectedFloor, setSelectedFloor] = useState<string | null>(null);
+    const selectedBuildingObj = buildings.find(b => b._id === selectedBuilding);
+    const selectedFloorObj = selectedBuildingObj?.floors.find(f => f._id === selectedFloor);
 
     // Build form state
     const [newBuilding, setNewBuilding] = useState({ name: "", code: "", number: 1 });
+    const [newBuildingColor, setNewBuildingColor] = useState("#8B5CF6");
     const [pendingCoords, setPendingCoords] = useState<{ x: number; y: number } | null>(null);
     const [pendingPolygon, setPendingPolygon] = useState<IPercentPoint[] | null>(null);
 
     // Edit state
     const [editingBuilding, setEditingBuilding] = useState<string | null>(null);
-    const [editForm, setEditForm] = useState({ name: "", code: "", number: 1 });
+    const [editForm, setEditForm] = useState({ name: "", code: "", number: 1, color: "#8B5CF6" });
+
+    const [newActivity, setNewActivity] = useState({ name: "", description: "", specialtyId: "", assignedTo: "", status: "In Progress" });
+    const [editingActivity, setEditingActivity] = useState<string | null>(null);
+    const [editActivityForm, setEditActivityForm] = useState({ name: "", description: "", specialtyId: "", assignedTo: "", status: "In Progress" });
+    const [selectedActivity, setSelectedActivity] = useState<string | null>(null);
 
     // Floor form state
     const [showAddFloor, setShowAddFloor] = useState<string | null>(null);
@@ -132,6 +152,7 @@ export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, 
                 name: newBuilding.name,
                 code: newBuilding.code,
                 number: newBuilding.number,
+                color: newBuildingColor,
                 coordinates: { xPercent: pendingCoords.x, yPercent: pendingCoords.y },
                 ...(pendingPolygon && pendingPolygon.length >= 3 ? { polygon: pendingPolygon } : {}),
             });
@@ -140,6 +161,7 @@ export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, 
                 setPendingCoords(null);
                 setPendingPolygon(null);
                 setNewBuilding({ name: "", code: "", number: buildings.length + 2 });
+                setNewBuildingColor("#8B5CF6");
                 router.refresh();
             } else {
                 alert(res.error || "Failed to create building");
@@ -153,6 +175,7 @@ export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, 
                 name: editForm.name,
                 code: editForm.code,
                 number: editForm.number,
+                color: editForm.color,
             });
             if (res.success) {
                 setEditingBuilding(null);
@@ -195,89 +218,58 @@ export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, 
         });
     };
 
-    const [zoomScale, setZoomScale] = useState(1);
-    const selected = buildings.find(b => b._id === selectedBuilding);
-
-    const showCount = zoomScale >= 2.5;
-
-    // Panzoom setup — image-overlay separation for zero-lag
-    const imgRef = useRef<HTMLImageElement>(null);
-    const overlayRef = useRef<HTMLDivElement>(null);
-    const panzoomRef = useRef<ReturnType<typeof Panzoom> | null>(null);
-    const rafIdRef = useRef<number>(0);
-
-    useEffect(() => {
-        const img = imgRef.current;
-        const parent = planContainerRef.current;
-        if (!img || !parent) return;
-
-        // Panzoom on <img> ONLY — single DOM node, maximum performance
-        const pz = Panzoom(img, {
-            maxScale: 50,
-            minScale: 0.02,
-            startScale: 1,
-            step: 0.15,
-            cursor: "grab",
-            touchAction: "none",
-            disablePan: mode === "placing" || mode === "drawing",
-        });
-
-        panzoomRef.current = pz;
-
-        // Sync overlay transform on every frame (direct DOM, zero React re-renders)
-        const syncOverlay = () => {
-            const overlay = overlayRef.current;
-            if (overlay && img) overlay.style.transform = img.style.transform;
-        };
-
-        // Throttle scale state update
-        const updateScale = () => {
-            cancelAnimationFrame(rafIdRef.current);
-            rafIdRef.current = requestAnimationFrame(() => setZoomScale(pz.getScale()));
-        };
-
-        const handleWheel = (e: WheelEvent) => pz.zoomWithWheel(e);
-        parent.addEventListener("wheel", handleWheel, { passive: false });
-
-        img.addEventListener("panzoomchange", syncOverlay);
-        img.addEventListener("panzoompan", syncOverlay);
-        img.addEventListener("panzoomzoom", syncOverlay);
-        img.addEventListener("panzoomzoom", updateScale);
-        img.addEventListener("panzoomend", syncOverlay);
-        img.addEventListener("panzoomend", updateScale);
-
-        return () => {
-            cancelAnimationFrame(rafIdRef.current);
-            parent.removeEventListener("wheel", handleWheel);
-            img.removeEventListener("panzoomchange", syncOverlay);
-            img.removeEventListener("panzoompan", syncOverlay);
-            img.removeEventListener("panzoomzoom", syncOverlay);
-            img.removeEventListener("panzoomzoom", updateScale);
-            img.removeEventListener("panzoomend", syncOverlay);
-            img.removeEventListener("panzoomend", updateScale);
-            pz.destroy();
-            panzoomRef.current = null;
-        };
-    }, [masterPlanImageUrl]);
-
-    // Update disablePan when mode changes
-    useEffect(() => {
-        if (panzoomRef.current) {
-            panzoomRef.current.setOptions({
-                disablePan: mode === "placing" || mode === "drawing",
+    const handleCreateActivity = () => {
+        if (!pendingCoords || !selectedFloorObj || !selectedBuildingObj) return;
+        startTransition(async () => {
+            const res = await createCommitment({
+                projectId: currentProjectId,
+                buildingId: selectedBuildingObj._id,
+                floorId: selectedFloorObj._id,
+                name: newActivity.name,
+                description: newActivity.description,
+                specialtyId: newActivity.specialtyId,
+                assignedTo: newActivity.assignedTo || null,
+                status: newActivity.status,
+                coordinates: { xPercent: pendingCoords.x, yPercent: pendingCoords.y },
+                ...(pendingPolygon && pendingPolygon.length >= 3 ? { polygon: pendingPolygon } : {})
             });
-        }
-    }, [mode]);
+            if (res.success) {
+                setMode("view");
+                setPendingCoords(null);
+                setPendingPolygon(null);
+                setNewActivity({ name: "", description: "", specialtyId: "", assignedTo: "", status: "In Progress" });
+                router.refresh();
+            } else alert(res.error || "Failed to create activity");
+        });
+    };
 
-    const handleZoomIn = useCallback(() => panzoomRef.current?.zoomIn(), []);
-    const handleZoomOut = useCallback(() => panzoomRef.current?.zoomOut(), []);
-    const handleReset = useCallback(() => {
-        panzoomRef.current?.reset();
-        if (overlayRef.current) overlayRef.current.style.transform = "";
-    }, []);
+    const handleEditActivity = (activityId: string) => {
+        startTransition(async () => {
+            const res = await updateCommitment(activityId, {
+                name: editActivityForm.name,
+                description: editActivityForm.description,
+                specialtyId: editActivityForm.specialtyId,
+                assignedTo: editActivityForm.assignedTo || null,
+                status: editActivityForm.status,
+            });
+            if (res.success) {
+                setEditingActivity(null);
+                router.refresh();
+            } else alert(res.error || "Failed to update activity");
+        });
+    };
 
-    // Figma-style: pixelated rendering at high zoom
-    const imageRendering = zoomScale >= 8 ? "pixelated" as const : "auto" as const;
+    const handleDeleteActivity = (activityId: string) => {
+        if (!confirm("Delete this activity?")) return;
+        startTransition(async () => {
+            const res = await deleteCommitment(activityId);
+            if (res.success) router.refresh();
+        });
+    };
+
+    const selected = selectedBuildingObj;
+    const COLOR_OPTIONS = ["#8B5CF6", "#3B82F6", "#F59E0B", "#10B981", "#EC4899", "#06B6D4", "#EF4444", "#64748B"];
+    const ACTIVITY_STATUSES = ["Request", "Notified", "Committed", "In Progress", "Completed", "Delayed", "Restricted"];
 
     return (
         <div className="flex flex-col lg:flex-row gap-6 h-full min-h-[600px]">
@@ -296,20 +288,24 @@ export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, 
             <div className="flex-1 flex flex-col gap-3">
                 <div className="flex items-center justify-between">
                     <div>
-                        <h2 className="text-lg font-bold text-neutral-900 dark:text-white">Master Plan</h2>
+                        <h2 className="text-lg font-bold text-neutral-900 dark:text-white">
+                            {selectedFloorObj ? `${selectedBuildingObj?.name} - ${selectedFloorObj.label}` : "Master Plan"}
+                        </h2>
                         <p className="text-xs text-neutral-500">
-                            {!masterPlanImageUrl
+                            {(!masterPlanImageUrl && !selectedFloorObj)
                                 ? "Upload a master plan image to get started"
                                 : mode === "placing"
-                                    ? "👆 Click on the plan to place the building"
+                                    ? `👆 Click on the plan to place the ${selectedFloorObj ? "activity" : "building"}`
                                     : mode === "drawing"
-                                        ? "✏️ Draw a zone on the plan to define the building area"
-                                        : `${buildings.length} building${buildings.length !== 1 ? "s" : ""} placed`
+                                        ? `✏️ Draw a zone on the plan to define the ${selectedFloorObj ? "activity" : "building"} area`
+                                        : selectedFloorObj
+                                            ? `${commitments.filter(c => c.floorId === selectedFloorObj._id).length} activities placed`
+                                            : `${buildings.length} building${buildings.length !== 1 ? "s" : ""} placed`
                             }
                         </p>
                     </div>
                     <div className="flex items-center gap-2">
-                        {masterPlanImageUrl && (
+                        {masterPlanImageUrl && !selectedFloorObj && (
                             <button
                                 onClick={() => masterPlanFileRef.current?.click()}
                                 disabled={uploadingMasterPlan}
@@ -319,34 +315,55 @@ export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, 
                                 {uploadingMasterPlan ? "Uploading..." : "Change Plan"}
                             </button>
                         )}
-                        {masterPlanImageUrl && mode === "view" ? (
+                        {((masterPlanImageUrl && !selectedFloorObj) || (selectedFloorObj && selectedFloorObj.gcsImageUrl)) && mode === "view" ? (
                             <div className="flex items-center gap-2">
-                                <button
-                                    onClick={() => {
-                                        setMode("placing");
-                                        setNewBuilding({ name: "", code: "", number: buildings.length + 1 });
-                                        setPendingCoords(null);
-                                        setPendingPolygon(null);
-                                    }}
-                                    className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-lg text-sm font-bold hover:bg-primary/90 transition-colors shadow-sm"
-                                >
-                                    <span className="material-symbols-outlined text-[18px]">add_location_alt</span>
-                                    Place Pin
-                                </button>
-                                <button
-                                    onClick={() => {
-                                        setMode("drawing");
-                                        setNewBuilding({ name: "", code: "", number: buildings.length + 1 });
-                                        setPendingCoords(null);
-                                        setPendingPolygon(null);
-                                    }}
-                                    className="flex items-center gap-2 px-4 py-2 bg-emerald-500 text-white rounded-lg text-sm font-bold hover:bg-emerald-600 transition-colors shadow-sm"
-                                >
-                                    <span className="material-symbols-outlined text-[18px]">draw</span>
-                                    Draw Zone
-                                </button>
+                                {!showPlaceOptions ? (
+                                    <button
+                                        onClick={() => setShowPlaceOptions(true)}
+                                        className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-lg text-sm font-bold hover:bg-primary/90 transition-colors shadow-sm"
+                                    >
+                                        <span className="material-symbols-outlined text-[18px]">add_location_alt</span>
+                                        Place Pin
+                                    </button>
+                                ) : (
+                                    <>
+                                        <button
+                                            onClick={() => {
+                                                setMode("placing");
+                                                setNewBuilding({ name: "", code: "", number: buildings.length + 1 });
+                                                setPendingCoords(null);
+                                                setPendingPolygon(null);
+                                                setShowPlaceOptions(false);
+                                            }}
+                                            className="flex items-center gap-2 px-3 py-2 bg-primary text-white rounded-lg text-sm font-bold hover:bg-primary/90 transition-colors shadow-sm"
+                                        >
+                                            <span className="material-symbols-outlined text-[18px]">push_pin</span>
+                                            Exact Point
+                                        </button>
+                                        <button
+                                            onClick={() => {
+                                                setMode("drawing");
+                                                setNewBuilding({ name: "", code: "", number: buildings.length + 1 });
+                                                setPendingCoords(null);
+                                                setPendingPolygon(null);
+                                                setShowPlaceOptions(false);
+                                            }}
+                                            className="flex items-center gap-2 px-3 py-2 bg-emerald-500 text-white rounded-lg text-sm font-bold hover:bg-emerald-600 transition-colors shadow-sm"
+                                        >
+                                            <span className="material-symbols-outlined text-[18px]">draw</span>
+                                            Draw Zone
+                                        </button>
+                                        <button
+                                            onClick={() => setShowPlaceOptions(false)}
+                                            className="flex items-center justify-center p-2 text-neutral-500 bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 dark:text-neutral-400 rounded-lg transition-colors shadow-sm"
+                                            title="Cancel"
+                                        >
+                                            <span className="material-symbols-outlined text-[18px]">close</span>
+                                        </button>
+                                    </>
+                                )}
                             </div>
-                        ) : masterPlanImageUrl && (mode === "placing" || mode === "drawing") ? (
+                        ) : ((masterPlanImageUrl && !selectedFloorObj) || selectedFloorObj) && (mode === "placing" || mode === "drawing") ? (
                             <button
                                 onClick={() => { setMode("view"); setPendingCoords(null); setPendingPolygon(null); }}
                                 className="flex items-center gap-2 px-4 py-2 text-neutral-600 dark:text-neutral-400 bg-neutral-100 dark:bg-neutral-800 rounded-lg text-sm font-bold hover:bg-neutral-200 transition-colors"
@@ -363,7 +380,15 @@ export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, 
                     onChange={(e) => { const f = e.target.files?.[0]; if (f) handleUploadMasterPlan(f); }} />
 
                 {/* No image: Upload prompt */}
-                {!masterPlanImageUrl ? (
+                {selectedFloorObj && !selectedFloorObj.gcsImageUrl ? (
+                    <div className="flex-1 flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 min-h-[400px]">
+                        <span className="material-symbols-outlined text-6xl text-neutral-300 dark:text-neutral-600 mb-4">image_not_supported</span>
+                        <p className="text-base font-bold text-neutral-700 dark:text-neutral-300">
+                            No floor plan uploaded
+                        </p>
+                        <p className="text-xs text-neutral-400 mt-3">Upload a plan to place activities</p>
+                    </div>
+                ) : !masterPlanImageUrl && !selectedFloorObj ? (
                     <div
                         className="flex-1 flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 hover:border-primary/50 transition-colors cursor-pointer min-h-[400px]"
                         onClick={() => masterPlanFileRef.current?.click()}
@@ -378,176 +403,169 @@ export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, 
                 ) : (
                     <>
                         <div
-                            ref={planContainerRef}
-                            className={`flex-1 relative isolate rounded-xl border-2 bg-neutral-100 dark:bg-neutral-800 shadow-inner ${(mode === "placing" || mode === "drawing") ? "border-primary border-dashed cursor-crosshair" : "border-neutral-200 dark:border-neutral-700 cursor-move"}`}
-                            style={{ overflow: "hidden" }}
+                            className={`flex-1 relative isolate rounded-xl bg-neutral-100 dark:bg-neutral-800 flex flex-col min-h-[500px] ${(mode === "placing" || mode === "drawing") ? "ring-2 ring-primary ring-offset-2 dark:ring-offset-neutral-900" : ""}`}
                         >
-                            {/* Layer 1: Image — panzoom transforms ONLY this element */}
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img
-                                ref={imgRef}
-                                id="admin-plan-image"
-                                src={masterPlanImageUrl}
-                                alt="Master Plan"
-                                className="w-full h-full object-contain select-none"
-                                draggable={false}
-                                decoding="async"
-                                style={{ imageRendering, transformOrigin: "50% 50%" }}
-                            />
-
-                            {/* Layer 2: Overlay — synced via DOM ref (zero React re-renders) */}
-                            <div
-                                ref={overlayRef}
-                                className="absolute inset-0 w-full h-full"
-                                style={{ transformOrigin: "50% 50%", pointerEvents: "none" }}
-                                onClick={handlePlanClick}
-                            >
-                                {/* Building markers */}
-                                {buildings.map((b) => {
-                                    const count = commitmentCounts[b._id] || 0;
-                                    const isSelected = selectedBuilding === b._id;
-
-                                    return (
-                                        <div
-                                            key={b._id}
-                                            data-building-marker
-                                            className="absolute z-10 hover:z-50 group"
-                                            style={{
-                                                top: `${b.coordinates.yPercent}%`,
-                                                left: `${b.coordinates.xPercent}%`,
-                                                transform: `translate(-50%, -50%) scale(${1 / Math.max(zoomScale, 1)})`,
-                                                pointerEvents: "auto",
-                                            }}
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                if (mode === "view") setSelectedBuilding(isSelected ? null : b._id);
-                                            }}
-                                        >
-                                            {isSelected && (
-                                                <div className="absolute inset-0 rounded-full bg-primary/30 animate-ping" />
-                                            )}
-                                            <div className={`relative flex items-center justify-center rounded-full shadow-md cursor-pointer transition-all font-bold
-                                                ${showCount ? "size-4 text-[8px] border-[1px]" : "size-1 border-[0.5px]"}
-                                                ${isSelected
-                                                    ? "bg-primary text-white border-white scale-125 ring-2 ring-primary/30"
-                                                    : "bg-white dark:bg-neutral-800 text-neutral-900 dark:text-white border-primary/60 hover:scale-[3] hover:ring-1 hover:ring-primary/20"
-                                                }`}
-                                            >
-                                                {showCount && count}
-                                            </div>
-                                            <div className="absolute left-1/2 -translate-x-1/2 -top-6 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap">
-                                                <div className="bg-neutral-900 text-white text-[9px] font-bold px-1.5 py-0.5 rounded shadow-lg">
-                                                    {b.name} ({b.code})
-                                                </div>
-                                            </div>
-                                        </div>
-                                    );
-                                })}
-
-                                {/* Pending placement */}
-                                {mode === "placing" && pendingCoords && (
-                                    <div
-                                        className="absolute z-20"
-                                        style={{
-                                            top: `${pendingCoords.y}%`,
-                                            left: `${pendingCoords.x}%`,
-                                            transform: `translate(-50%, -50%) scale(${1 / Math.max(zoomScale, 1)})`,
-                                            pointerEvents: "auto",
-                                        }}
-                                    >
-                                        <div className="relative flex items-center justify-center size-3 rounded-full bg-emerald-500 text-white border border-white shadow-xl animate-bounce">
-                                            <span className="material-symbols-outlined text-[8px]">add</span>
-                                        </div>
-                                    </div>
-                                )}
-
-                                {/* Free-draw overlay */}
-                                <FreeDrawOverlay
-                                    isDrawing={mode === "drawing"}
-                                    drawColor="#2563EB"
-                                    existingPolygons={buildings
-                                        .filter(b => b.polygon && b.polygon.length >= 3)
-                                        .map((b, idx) => ({
-                                            id: b._id,
-                                            points: b.polygon!,
-                                            color: ["#8B5CF6", "#3B82F6", "#F59E0B", "#10B981"][idx % 4],
-                                            label: `${b.name} (${b.code})`,
-                                            onClick: () => { if (mode === "view") setSelectedBuilding(b._id); },
+                            <div className="absolute inset-0 z-0">
+                                <InteractivePlanViewer
+                                    imageUrl={selectedFloorObj?.gcsImageUrl || masterPlanImageUrl}
+                                    hotspots={selectedFloorObj
+                                        ? commitments.filter(c => c.floorId === selectedFloorObj._id).map(c => ({
+                                            ...c,
+                                            name: c.name || c.description,
+                                            code: c.specialtyName,
+                                            color: c.specialtyColor || "#8B5CF6",
+                                            icon: "task_alt"
+                                        }))
+                                        : buildings.map(b => ({
+                                            ...b,
+                                            name: b.name,
+                                            code: b.code,
+                                            icon: "domain"
                                         }))
                                     }
-                                    onDrawComplete={(polygon, centroid) => {
-                                        setPendingPolygon(polygon);
-                                        setPendingCoords({ x: centroid.xPercent, y: centroid.yPercent });
+                                    mode={mode}
+                                    pendingCoords={pendingCoords}
+                                    pendingPolygon={pendingPolygon}
+                                    selectedHotspotId={selectedFloorObj ? selectedActivity : selectedBuilding}
+                                    onMapClick={(x, y) => {
+                                        if (mode === "placing" || mode === "drawing") {
+                                            setPendingCoords({ x, y });
+                                        }
+                                    }}
+                                    onHotspotSelect={(h) => {
+                                        if (!selectedFloorObj && mode === "view") {
+                                            setSelectedBuilding(h._id === selectedBuilding ? null : h._id);
+                                        }
+                                    }}
+                                    onCreatePolygon={(pts) => {
+                                        setPendingPolygon(pts);
+                                        if (pts.length > 0) {
+                                            const sumX = pts.reduce((s, p) => s + p.xPercent, 0);
+                                            const sumY = pts.reduce((s, p) => s + p.yPercent, 0);
+                                            setPendingCoords({ x: sumX / pts.length, y: sumY / pts.length });
+                                        }
                                     }}
                                 />
-
-                                {/* Pixel grid */}
-                                <PixelGridOverlay zoomScale={zoomScale} />
                             </div>
 
-                            {/* Zoom controls — outside transforms */}
-                            <div className="absolute bottom-4 right-4 flex flex-col gap-1 bg-white/90 dark:bg-neutral-900/90 backdrop-blur rounded-lg shadow-md p-0.5 border border-neutral-200 dark:border-neutral-700 z-10">
-                                <button onClick={handleZoomIn} className="p-1.5 hover:bg-neutral-100 dark:hover:bg-neutral-800 rounded transition-colors" title="Zoom In">
-                                    <span className="material-symbols-outlined text-neutral-600 dark:text-neutral-300 text-[16px]">add</span>
-                                </button>
-                                <button onClick={handleReset} className="p-1.5 hover:bg-neutral-100 dark:hover:bg-neutral-800 rounded transition-colors" title="Fit">
-                                    <span className="material-symbols-outlined text-neutral-600 dark:text-neutral-300 text-[16px]">fit_screen</span>
-                                </button>
-                                <button onClick={handleZoomOut} className="p-1.5 hover:bg-neutral-100 dark:hover:bg-neutral-800 rounded transition-colors" title="Zoom Out">
-                                    <span className="material-symbols-outlined text-neutral-600 dark:text-neutral-300 text-[16px]">remove</span>
-                                </button>
-                            </div>
-
-                            {/* Zoom % badge */}
-                            <div className="absolute bottom-4 left-4 z-10 bg-neutral-900/80 text-white text-[10px] font-mono px-1.5 py-0.5 rounded select-none">
-                                {Math.round(zoomScale * 100)}%
-                            </div>
+                            {/* Placing/Drawing mode: form below the plan */}
+                            {(mode === "placing" || mode === "drawing") && pendingCoords && (
+                                <div className="bg-white dark:bg-neutral-900 border border-emerald-200 dark:border-emerald-800 rounded-xl p-5 shadow-sm relative z-10 mx-4 mb-4 mt-auto">
+                                    {selectedFloorObj ? (
+                                        <>
+                                            <div className="flex items-center gap-2 mb-3">
+                                                <span className="material-symbols-outlined text-emerald-500 text-[18px]">task_alt</span>
+                                                <span className="text-sm font-bold text-neutral-900 dark:text-white">
+                                                    New Activity at ({pendingCoords.x.toFixed(1)}%, {pendingCoords.y.toFixed(1)}%)
+                                                </span>
+                                            </div>
+                                            <div className="grid gap-3 mb-4">
+                                                <input type="text" placeholder="Activity Name" value={newActivity.name}
+                                                    onChange={(e) => setNewActivity({ ...newActivity, name: e.target.value })}
+                                                    className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-700 rounded-lg text-sm bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:ring-primary focus:border-primary" />
+                                                <textarea placeholder="Description" value={newActivity.description}
+                                                    onChange={(e) => setNewActivity({ ...newActivity, description: e.target.value })}
+                                                    className="w-full flex-1 px-3 py-2 border border-neutral-300 dark:border-neutral-700 rounded-lg text-sm bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:ring-primary focus:border-primary resize-none h-16" />
+                                            </div>
+                                            <div className="grid grid-cols-2 gap-3 mb-4">
+                                                <select value={newActivity.specialtyId} onChange={e => setNewActivity({ ...newActivity, specialtyId: e.target.value })}
+                                                    className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-700 rounded-lg text-sm bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:ring-primary focus:border-primary">
+                                                    <option value="" disabled>Select Specialty...</option>
+                                                    {specialties.map(s => (
+                                                        <option key={s._id} value={s._id}>{s.name}</option>
+                                                    ))}
+                                                </select>
+                                                <select value={newActivity.assignedTo} onChange={e => setNewActivity({ ...newActivity, assignedTo: e.target.value })}
+                                                    className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-700 rounded-lg text-sm bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:ring-primary focus:border-primary">
+                                                    <option value="">Unassigned</option>
+                                                    {activeUsers.filter(u => {
+                                                        const spec = specialties.find(s => s._id === newActivity.specialtyId);
+                                                        return !spec || u.specialtyName === spec.name;
+                                                    }).map(u => (
+                                                        <option key={u._id} value={u._id}>{u.name}</option>
+                                                    ))}
+                                                </select>
+                                                <select value={newActivity.status} onChange={e => setNewActivity({ ...newActivity, status: e.target.value })}
+                                                    className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-700 rounded-lg text-sm bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:ring-primary focus:border-primary col-span-2">
+                                                    <option value="In Progress">In Progress</option>
+                                                    <option value="Completed">Completed</option>
+                                                    <option value="Delayed">Delayed</option>
+                                                    <option value="Restricted">Restricted</option>
+                                                </select>
+                                            </div>
+                                            <div className="flex gap-2">
+                                                <button onClick={handleCreateActivity} disabled={isPending || !newActivity.name || !newActivity.specialtyId}
+                                                    className="px-4 py-2 bg-emerald-500 text-white rounded-lg text-sm font-bold hover:bg-emerald-600 transition-colors disabled:opacity-50 shadow-sm">
+                                                    Create Activity
+                                                </button>
+                                                <button onClick={() => { setPendingCoords(null); setPendingPolygon(null); setMode("view"); }}
+                                                    className="px-4 py-2 text-neutral-600 hover:bg-neutral-100 dark:hover:bg-neutral-800 rounded-lg text-sm font-medium transition-colors">
+                                                    Cancel
+                                                </button>
+                                            </div>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <div className="flex items-center gap-2 mb-3">
+                                                <span className="material-symbols-outlined text-emerald-500 text-[18px]">{mode === "drawing" ? "draw" : "location_on"}</span>
+                                                <span className="text-sm font-bold text-neutral-900 dark:text-white">
+                                                    {mode === "drawing"
+                                                        ? `New Building Zone (${pendingPolygon?.length || 0} points)`
+                                                        : `New Building at (${pendingCoords.x.toFixed(1)}%, ${pendingCoords.y.toFixed(1)}%)`
+                                                    }
+                                                </span>
+                                            </div>
+                                            <div className="grid grid-cols-3 gap-3 mb-3">
+                                                <input type="text" placeholder="Name" value={newBuilding.name}
+                                                    onChange={(e) => setNewBuilding({ ...newBuilding, name: e.target.value })}
+                                                    className="px-3 py-2 border border-neutral-300 dark:border-neutral-700 rounded-lg text-sm bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:ring-primary focus:border-primary" />
+                                                <input type="text" placeholder="Code (e.g. BLD-01)" value={newBuilding.code}
+                                                    onChange={(e) => setNewBuilding({ ...newBuilding, code: e.target.value })}
+                                                    className="px-3 py-2 border border-neutral-300 dark:border-neutral-700 rounded-lg text-sm bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:ring-primary focus:border-primary" />
+                                                <input type="number" placeholder="Number" value={newBuilding.number} min={1}
+                                                    onChange={(e) => setNewBuilding({ ...newBuilding, number: parseInt(e.target.value) || 1 })}
+                                                    className="px-3 py-2 border border-neutral-300 dark:border-neutral-700 rounded-lg text-sm bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:ring-primary focus:border-primary" />
+                                            </div>
+                                            <div className="flex items-center gap-2 mb-4">
+                                                <span className="text-xs font-bold text-neutral-500 uppercase">Color:</span>
+                                                <div className="flex items-center gap-1.5 flex-wrap">
+                                                    {COLOR_OPTIONS.map(c => (
+                                                        <button
+                                                            key={c}
+                                                            onClick={() => setNewBuildingColor(c)}
+                                                            className={`w-6 h-6 rounded-full shadow-sm transition-transform hover:scale-110 ${newBuildingColor === c ? "ring-2 ring-offset-2 ring-offset-white dark:ring-offset-neutral-900 ring-primary scale-110" : "opacity-80 border border-neutral-200"}`}
+                                                            style={{ backgroundColor: c }}
+                                                            title={c}
+                                                        />
+                                                    ))}
+                                                </div>
+                                            </div>
+                                            <div className="flex gap-2">
+                                                <button onClick={handleCreateBuilding} disabled={isPending || !newBuilding.name || !newBuilding.code}
+                                                    className="px-4 py-2 bg-emerald-500 text-white rounded-lg text-sm font-bold hover:bg-emerald-600 transition-colors disabled:opacity-50 shadow-sm">
+                                                    Create Building
+                                                </button>
+                                                <button onClick={() => { setPendingCoords(null); setPendingPolygon(null); }}
+                                                    className="px-4 py-2 text-neutral-600 hover:bg-neutral-100 dark:hover:bg-neutral-800 rounded-lg text-sm font-medium transition-colors">
+                                                    {mode === "drawing" ? "Clear Drawing" : "Clear Pin"}
+                                                </button>
+                                            </div>
+                                        </>
+                                    )}
+                                </div>
+                            )}
                         </div>
-
-                        {/* Placing/Drawing mode: form below the plan */}
-                        {(mode === "placing" || mode === "drawing") && pendingCoords && (
-                            <div className="bg-white dark:bg-neutral-900 border border-emerald-200 dark:border-emerald-800 rounded-xl p-5 shadow-sm">
-                                <div className="flex items-center gap-2 mb-3">
-                                    <span className="material-symbols-outlined text-emerald-500 text-[18px]">{mode === "drawing" ? "draw" : "location_on"}</span>
-                                    <span className="text-sm font-bold text-neutral-900 dark:text-white">
-                                        {mode === "drawing"
-                                            ? `New Building Zone (${pendingPolygon?.length || 0} points)`
-                                            : `New Building at (${pendingCoords.x.toFixed(1)}%, ${pendingCoords.y.toFixed(1)}%)`
-                                        }
-                                    </span>
-                                </div>
-                                <div className="grid grid-cols-3 gap-3 mb-3">
-                                    <input type="text" placeholder="Name" value={newBuilding.name}
-                                        onChange={(e) => setNewBuilding({ ...newBuilding, name: e.target.value })}
-                                        className="px-3 py-2 border border-neutral-300 dark:border-neutral-700 rounded-lg text-sm bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:ring-primary focus:border-primary" />
-                                    <input type="text" placeholder="Code (e.g. BLD-01)" value={newBuilding.code}
-                                        onChange={(e) => setNewBuilding({ ...newBuilding, code: e.target.value })}
-                                        className="px-3 py-2 border border-neutral-300 dark:border-neutral-700 rounded-lg text-sm bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:ring-primary focus:border-primary" />
-                                    <input type="number" placeholder="Number" value={newBuilding.number} min={1}
-                                        onChange={(e) => setNewBuilding({ ...newBuilding, number: parseInt(e.target.value) || 1 })}
-                                        className="px-3 py-2 border border-neutral-300 dark:border-neutral-700 rounded-lg text-sm bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:ring-primary focus:border-primary" />
-                                </div>
-                                <div className="flex gap-2">
-                                    <button onClick={handleCreateBuilding} disabled={isPending || !newBuilding.name || !newBuilding.code}
-                                        className="px-4 py-2 bg-emerald-500 text-white rounded-lg text-sm font-bold hover:bg-emerald-600 transition-colors disabled:opacity-50 shadow-sm">
-                                        Create Building
-                                    </button>
-                                    <button onClick={() => { setPendingCoords(null); setPendingPolygon(null); }}
-                                        className="px-4 py-2 text-neutral-600 hover:bg-neutral-100 dark:hover:bg-neutral-800 rounded-lg text-sm font-medium transition-colors">
-                                        {mode === "drawing" ? "Clear Drawing" : "Clear Pin"}
-                                    </button>
-                                </div>
-                            </div>
-                        )}
                     </>
                 )}
             </div>
 
-            {/* ─── Right: Building Details Panel ──────────────── */}
+            {/* ─── Right: Details Panel ─────────────────────── */}
             <div className="w-full lg:w-96 flex flex-col gap-3 overflow-y-auto shrink-0">
-                <h3 className="text-sm font-bold text-neutral-700 dark:text-neutral-300 uppercase tracking-wider">
-                    {selected ? selected.name : "Buildings"}
-                </h3>
+                {!selectedFloorObj && (
+                    <h3 className="text-sm font-bold text-neutral-700 dark:text-neutral-300 uppercase tracking-wider">
+                        {selected ? selected.name : "Buildings"}
+                    </h3>
+                )}
 
                 {/* Building list (when none selected) */}
                 {!selected && (
@@ -582,10 +600,10 @@ export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, 
                     </div>
                 )}
 
-                {/* Building detail (when selected) */}
-                {selected && (
+                {/* Building detail (when selected but floor NOT selected) */}
+                {selected && !selectedFloorObj && (
                     <div className="space-y-4">
-                        <button onClick={() => setSelectedBuilding(null)}
+                        <button onClick={() => { setSelectedBuilding(null); setSelectedFloor(null); }}
                             className="flex items-center gap-1 text-sm text-primary font-semibold hover:underline">
                             <span className="material-symbols-outlined text-[16px]">arrow_back</span>
                             Back to all buildings
@@ -602,6 +620,16 @@ export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, 
                                             className="px-3 py-2 border border-neutral-300 dark:border-neutral-700 rounded-lg text-sm bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100" placeholder="Code" />
                                         <input type="number" value={editForm.number} onChange={(e) => setEditForm({ ...editForm, number: parseInt(e.target.value) || 1 })}
                                             className="px-3 py-2 border border-neutral-300 dark:border-neutral-700 rounded-lg text-sm bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100" />
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        {COLOR_OPTIONS.map(c => (
+                                            <button
+                                                key={c}
+                                                onClick={() => setEditForm({ ...editForm, color: c })}
+                                                className={`w-5 h-5 rounded-full shadow-sm transition-transform hover:scale-110 ${editForm.color === c ? "ring-2 ring-offset-2 ring-offset-white dark:ring-offset-neutral-900 ring-primary scale-110" : "opacity-80 border border-neutral-200"}`}
+                                                style={{ backgroundColor: c }}
+                                            />
+                                        ))}
                                     </div>
                                     <div className="flex gap-2">
                                         <button onClick={() => handleEditBuilding(selected._id)} disabled={isPending}
@@ -620,7 +648,7 @@ export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, 
                                         </p>
                                     </div>
                                     <div className="flex gap-1">
-                                        <button onClick={() => { setEditingBuilding(selected._id); setEditForm({ name: selected.name, code: selected.code, number: selected.number }); }}
+                                        <button onClick={() => { setEditingBuilding(selected._id); setEditForm({ name: selected.name, code: selected.code, number: selected.number, color: selected.color || "#8B5CF6" }); }}
                                             className="p-1.5 text-neutral-400 hover:text-primary hover:bg-primary/10 rounded-lg transition-colors">
                                             <span className="material-symbols-outlined text-[16px]">edit</span>
                                         </button>
@@ -658,7 +686,7 @@ export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, 
                                     <div className="mb-2">
                                         {floorImageUrl ? (
                                             <div className="relative rounded-lg overflow-hidden border border-neutral-200 dark:border-neutral-700 h-24">
-                                                <Image src={floorImageUrl} alt="Preview" fill className="object-contain" />
+                                                <Image src={floorImageUrl} alt="Preview" fill className="object-contain" unoptimized />
                                                 <button onClick={() => { setFloorImageUrl(""); if (fileInputRef.current) fileInputRef.current.value = ""; }}
                                                     className="absolute top-1 right-1 p-0.5 bg-rose-500 text-white rounded-full hover:bg-rose-600">
                                                     <span className="material-symbols-outlined text-[12px]">close</span>
@@ -689,25 +717,156 @@ export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, 
                             ) : (
                                 <div className="space-y-1.5">
                                     {selected.floors.map(floor => (
-                                        <div key={floor._id} className="flex items-center justify-between bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-lg px-3 py-2.5 group">
+                                        <div key={floor._id}
+                                            onClick={() => setSelectedFloor(floor._id)}
+                                            className="flex items-center justify-between bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-lg px-3 py-2.5 group cursor-pointer hover:border-primary/50 transition-all">
                                             <div className="flex items-center gap-2.5">
-                                                {floor.gcsImageUrl && (
+                                                {floor.gcsImageUrl ? (
                                                     <div className="relative size-7 rounded border border-neutral-200 dark:border-neutral-700 overflow-hidden shrink-0">
-                                                        <Image src={floor.gcsImageUrl} alt={floor.label} fill className="object-cover" />
+                                                        <Image src={floor.gcsImageUrl} alt={floor.label} fill className="object-cover" unoptimized />
+                                                    </div>
+                                                ) : (
+                                                    <div className="relative size-7 rounded border border-neutral-200 dark:border-neutral-700 overflow-hidden shrink-0 flex items-center justify-center bg-neutral-100 dark:bg-neutral-800">
+                                                        <span className="material-symbols-outlined text-[14px] text-neutral-400">image_not_supported</span>
                                                     </div>
                                                 )}
                                                 <div>
-                                                    <p className="text-sm font-semibold text-neutral-900 dark:text-white">{floor.label}</p>
+                                                    <p className="text-sm font-semibold text-neutral-900 dark:text-white group-hover:text-primary transition-colors">{floor.label}</p>
                                                     <p className="text-[10px] text-neutral-500">Level {floor.order}</p>
                                                 </div>
                                             </div>
-                                            <button onClick={() => handleDeleteFloor(floor._id)}
-                                                className="p-1 text-neutral-400 hover:text-rose-500 hover:bg-rose-50 rounded transition-colors opacity-0 group-hover:opacity-100">
-                                                <span className="material-symbols-outlined text-[14px]">delete</span>
-                                            </button>
+                                            <div className="flex items-center gap-1">
+                                                <button onClick={(e) => { e.stopPropagation(); handleDeleteFloor(floor._id); }}
+                                                    className="p-1 text-neutral-400 hover:text-rose-500 hover:bg-rose-50 rounded transition-colors opacity-0 group-hover:opacity-100" title="Delete Floor">
+                                                    <span className="material-symbols-outlined text-[14px]">delete</span>
+                                                </button>
+                                                <span className="material-symbols-outlined text-neutral-400 group-hover:text-primary text-[18px]">chevron_right</span>
+                                            </div>
                                         </div>
                                     ))}
                                 </div>
+                            )}
+                        </div>
+                    </div>
+                )}
+
+                {/* Floor detail (when selected) */}
+                {selected && selectedFloorObj && (
+                    <div className="space-y-4">
+                        <button onClick={() => { setSelectedFloor(null); setMode("view"); setPendingCoords(null); setPendingPolygon(null); }}
+                            className="flex items-center gap-1 text-sm text-primary font-semibold hover:underline">
+                            <span className="material-symbols-outlined text-[16px]">arrow_back</span>
+                            Back to building details
+                        </button>
+
+                        <div className="flex items-center justify-between">
+                            <div>
+                                <h3 className="text-sm font-bold text-neutral-700 dark:text-neutral-300 uppercase tracking-wider">{selectedFloorObj.label}</h3>
+                                <p className="text-xs text-neutral-500">Activities on this floor</p>
+                            </div>
+                        </div>
+
+                        {/* Activities List */}
+                        <div className="space-y-2">
+                            {commitments.filter(c => c.floorId === selectedFloorObj._id).length === 0 ? (
+                                <div className="flex flex-col items-center justify-center py-8 text-neutral-500 bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-800">
+                                    <span className="material-symbols-outlined text-3xl mb-2 text-neutral-300">task_alt</span>
+                                    <p className="text-sm font-medium">No activities</p>
+                                    <p className="text-xs mt-1 text-center">Select "Place Pin" and click on<br />the plan to add an activity</p>
+                                </div>
+                            ) : (
+                                commitments.filter(c => c.floorId === selectedFloorObj._id).map(activity => (
+                                    <div key={activity._id}
+                                        onClick={() => { if (editingActivity !== activity._id) setSelectedActivity(activity._id); }}
+                                        className={`bg-white dark:bg-neutral-900 border ${selectedActivity === activity._id ? 'border-primary ring-1 ring-primary' : 'border-neutral-200 dark:border-neutral-800'} rounded-lg p-3 shadow-sm group cursor-pointer transition-all hover:border-primary/50`}>
+
+                                        {editingActivity === activity._id ? (
+                                            <div className="space-y-3" onClick={e => e.stopPropagation()}>
+                                                <input value={editActivityForm.name} onChange={(e) => setEditActivityForm({ ...editActivityForm, name: e.target.value })}
+                                                    className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-700 rounded-lg text-sm bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100" placeholder="Activity Name" />
+                                                <textarea value={editActivityForm.description} onChange={(e) => setEditActivityForm({ ...editActivityForm, description: e.target.value })}
+                                                    className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-700 rounded-lg text-sm bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 resize-none h-16" placeholder="Description (optional)" />
+                                                <div className="grid grid-cols-2 gap-2">
+                                                    <select value={editActivityForm.specialtyId} onChange={e => setEditActivityForm({ ...editActivityForm, specialtyId: e.target.value, assignedTo: "" })}
+                                                        className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-700 rounded-lg text-sm bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100">
+                                                        <option value="" disabled>Specialty</option>
+                                                        {specialties.map(s => <option key={s._id} value={s._id}>{s.name}</option>)}
+                                                    </select>
+                                                    <select value={editActivityForm.assignedTo} onChange={e => setEditActivityForm({ ...editActivityForm, assignedTo: e.target.value })}
+                                                        className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-700 rounded-lg text-sm bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100">
+                                                        <option value="">No Assignee</option>
+                                                        {activeUsers.filter(u => editActivityForm.specialtyId && u.specialtyName === specialties.find(s => s._id === editActivityForm.specialtyId)?.name).map(u => (
+                                                            <option key={u._id} value={u._id}>{u.name}</option>
+                                                        ))}
+                                                    </select>
+                                                    <select value={editActivityForm.status} onChange={e => setEditActivityForm({ ...editActivityForm, status: e.target.value })}
+                                                        className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-700 rounded-lg text-sm bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 col-span-2">
+                                                        <option value="In Progress">En proceso</option>
+                                                        <option value="Completed">Completado</option>
+                                                        <option value="Delayed">En retraso</option>
+                                                        <option value="Restricted">Con restricción</option>
+                                                    </select>
+                                                </div>
+                                                <div className="flex gap-2 pt-1">
+                                                    <button onClick={() => handleEditActivity(activity._id)} disabled={isPending}
+                                                        className="px-3 py-1.5 bg-emerald-500 text-white rounded-lg text-xs font-bold hover:bg-emerald-600 disabled:opacity-50">Save</button>
+                                                    <button onClick={() => setEditingActivity(null)}
+                                                        className="px-3 py-1.5 text-neutral-500 hover:bg-neutral-100 rounded-lg text-xs font-medium">Cancel</button>
+                                                </div>
+                                            </div>
+                                        ) : (
+                                            <div className="flex items-start justify-between">
+                                                <div className="flex items-start gap-2 max-w-[80%]">
+                                                    <div className="size-3 rounded-full mt-1 shrink-0 shadow-sm border border-black/10" style={{ backgroundColor: activity.specialtyColor || "#8B5CF6" }} />
+                                                    <div>
+                                                        <p className="text-sm font-bold text-neutral-900 dark:text-white leading-tight">{activity.name}</p>
+                                                        {activity.description && <p className="text-xs text-neutral-500 line-clamp-1 mt-0.5">{activity.description}</p>}
+                                                        <div className="flex flex-wrap gap-1 mt-1.5">
+                                                            <span className="px-1.5 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800 text-[10px] font-medium text-neutral-600 dark:text-neutral-400">
+                                                                {activity.specialtyName}
+                                                            </span>
+                                                            {activity.assignedToId && activeUsers.find(u => u._id === activity.assignedToId) && (
+                                                                <span className="px-1.5 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800 text-[10px] font-medium text-neutral-600 dark:text-neutral-400 flex items-center gap-1">
+                                                                    <span className="material-symbols-outlined text-[10px]">person</span>
+                                                                    {activeUsers.find(u => u._id === activity.assignedToId)?.name.split(' ')[0]}
+                                                                </span>
+                                                            )}
+                                                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${activity.status === "Completed" ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400" :
+                                                                activity.status === "In Progress" ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400" :
+                                                                    activity.status === "Delayed" ? "bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400" :
+                                                                        "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
+                                                                }`}>
+                                                                {activity.status === "In Progress" ? "En proceso" :
+                                                                    activity.status === "Completed" ? "Completado" :
+                                                                        activity.status === "Delayed" ? "En retraso" :
+                                                                            activity.status === "Restricted" ? "Con restricción" : activity.status}
+                                                            </span>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <div className="flex gap-1">
+                                                    <button onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        setEditingActivity(activity._id);
+                                                        setEditActivityForm({
+                                                            name: activity.name,
+                                                            description: activity.description || "",
+                                                            specialtyId: activity.specialtyId,
+                                                            assignedTo: activity.assignedToId || "",
+                                                            status: activity.status
+                                                        });
+                                                    }} className="p-1 text-neutral-400 hover:text-primary hover:bg-primary/10 rounded transition-colors opacity-0 group-hover:opacity-100" title="Edit Activity">
+                                                        <span className="material-symbols-outlined text-[16px]">edit</span>
+                                                    </button>
+                                                    <button onClick={(e) => { e.stopPropagation(); handleDeleteActivity(activity._id); }}
+                                                        className="p-1 text-neutral-400 hover:text-rose-500 hover:bg-rose-50 rounded transition-colors opacity-0 group-hover:opacity-100" title="Delete Activity">
+                                                        <span className="material-symbols-outlined text-[16px]">delete</span>
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                ))
                             )}
                         </div>
                     </div>

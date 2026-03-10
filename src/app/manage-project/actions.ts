@@ -6,6 +6,7 @@ import { isManagerRole } from "@/constants/roles";
 import { UserAdminService } from "@/services/userAdmin.service";
 import { ProjectService } from "@/services/project.service";
 import { ProjectRepository } from "@/repositories/project.repository";
+import { CommitmentRepository } from "@/repositories/commitment.repository";
 import { revalidatePath } from "next/cache";
 
 // ─── Project Settings Actions ─────────────────────────────────────
@@ -62,6 +63,7 @@ export async function createBuilding(
         number: number;
         coordinates: { xPercent: number; yPercent: number };
         polygon?: Array<{ xPercent: number; yPercent: number }>;
+        color?: string;
     }
 ) {
     const session = await auth();
@@ -83,7 +85,7 @@ export async function createBuilding(
 
 export async function updateBuilding(
     buildingId: string,
-    data: { name?: string; code?: string; number?: number; coordinates?: { xPercent: number; yPercent: number } }
+    data: { name?: string; code?: string; number?: number; color?: string; coordinates?: { xPercent: number; yPercent: number } }
 ) {
     const session = await auth();
     if (!session?.user || !isManagerRole(session.user.role)) {
@@ -179,5 +181,64 @@ export async function deleteFloor(floorId: string) {
     } catch (error) {
         console.error("Failed to delete floor:", error);
         return { success: false, error: "Failed to delete floor" };
+    }
+}
+
+// ─── Commitment (Activity) Management Actions ─────────────────────
+
+export async function createCommitment(data: Record<string, unknown>) {
+    const session = await auth();
+    if (!session?.user || !isManagerRole(session.user.role)) {
+        return { success: false, error: "Unauthorized" };
+    }
+
+    await connectToDatabase();
+
+    try {
+        await CommitmentRepository.create({
+            ...data,
+            requesterId: session.user.id,
+        });
+        revalidatePath('/manage-project');
+        return { success: true };
+    } catch (error) {
+        console.error("Failed to create commitment:", error);
+        return { success: false, error: "Failed to create activity" };
+    }
+}
+
+export async function updateCommitment(commitmentId: string, data: Record<string, unknown>) {
+    const session = await auth();
+    if (!session?.user || !isManagerRole(session.user.role)) {
+        return { success: false, error: "Unauthorized" };
+    }
+
+    await connectToDatabase();
+
+    try {
+        await CommitmentRepository.update(commitmentId, data);
+        revalidatePath('/manage-project');
+        return { success: true };
+    } catch (error) {
+        console.error("Failed to update commitment:", error);
+        return { success: false, error: "Failed to update activity" };
+    }
+}
+
+export async function deleteCommitment(commitmentId: string) {
+    const session = await auth();
+    if (!session?.user || !isManagerRole(session.user.role)) {
+        return { success: false, error: "Unauthorized" };
+    }
+
+    await connectToDatabase();
+
+    try {
+        await CommitmentRepository.delete(commitmentId);
+        revalidatePath('/manage-project');
+        return { success: true };
+    } catch (error) {
+        console.error("Failed to delete commitment:", error);
+        return { success: false, error: "Failed to delete activity" };
     }
 }

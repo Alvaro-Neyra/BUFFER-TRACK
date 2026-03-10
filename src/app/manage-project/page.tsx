@@ -58,15 +58,21 @@ export default async function ManageProjectPage({
         _id: c._id.toString(),
         buildingName: c.buildingId?.name || "N/A",
         buildingCode: c.buildingId?.code || "",
+        floorId: c.floorId?._id?.toString() || c.floorId?.toString() || "",
         floorLabel: c.floorId?.label || "N/A",
+        name: c.name || "Activity",
+        description: c.description || "",
+        specialtyId: c.specialtyId?._id?.toString() || c.specialtyId?.toString() || "",
         specialtyName: c.specialtyId?.name || "N/A",
         specialtyColor: c.specialtyId?.colorHex || "#cbd5e1",
+        assignedToId: c.assignedTo?._id?.toString() || c.assignedTo?.toString() || "",
         assignedToName: c.assignedTo?.name || "Unassigned",
         requesterName: c.requesterId?.name || "Unknown",
         status: c.status,
         targetDate: c.dates?.targetDate?.toISOString() || null,
         requestDate: c.dates?.requestDate?.toISOString() || null,
         coordinates: c.coordinates,
+        polygon: c.polygon?.map((p: any) => ({ xPercent: p.xPercent, yPercent: p.yPercent })) || undefined,
     }));
 
     // Serialize specialties for client

@@ -3,10 +3,10 @@
 import React, { useState } from "react";
 import { GlobalHeader } from "@/components/organisms/GlobalHeader";
 import { CalendarBar } from "@/components/organisms/CalendarBar";
-import { PlanViewer } from "@/components/organisms/PlanViewer";
+import { InteractivePlanViewer } from "@/components/organisms/InteractivePlanViewer";
 import { CommitmentDetailsSidebar } from "@/components/organisms/CommitmentDetailsSidebar";
 import { NewCommitmentModal } from "@/components/organisms/NewCommitmentModal";
-import { CommitmentPin } from "@/components/atoms/CommitmentPin";
+import { getSpecialtyIcon } from "@/lib/getSpecialtyIcon";
 
 // ─── Types ───────────────────────────────────────────────────────
 
@@ -27,8 +27,11 @@ export interface ICommitmentData {
     status: string;
     specialtyName: string;
     specialtyColor: string;
+    specialtyId: string;
+    assignedToId: string;
     assignedToName: string;
     assignedToCompany: string;
+    requesterId: string;
     requesterName: string;
     coordinates: { xPercent: number; yPercent: number };
     targetDate: string | null;
@@ -67,7 +70,6 @@ export function DetailPlanView({
     specialties,
     users,
     weekStart,
-    currentUserId,
 }: IDetailPlanViewProps) {
     const [selectedCommitment, setSelectedCommitment] = useState<ICommitmentData | null>(null);
     const [showNewModal, setShowNewModal] = useState(false);
@@ -118,7 +120,7 @@ export function DetailPlanView({
 
     return (
         <div className="flex flex-col h-full w-full overflow-hidden bg-[#F4F7F6] dark:bg-neutral-950">
-            <GlobalHeader title={`${floorData.buildingName} · ${floorData.label}`} />
+            <GlobalHeader title={`${floorData.buildingName} · ${floorData.label}`} showLinks={true} />
 
             <main className="flex-1 flex overflow-hidden">
                 <div className="flex-1 flex flex-col overflow-hidden relative">
@@ -150,37 +152,48 @@ export function DetailPlanView({
                             </button>
                         </div>
 
-                        <PlanViewer
+                        <InteractivePlanViewer
                             imageUrl={floorData.gcsImageUrl}
+                            hotspots={commitments.map(c => ({
+                                _id: c._id,
+                                name: c.description || c.specialtyName, // Fallback if no desc
+                                coordinates: c.coordinates,
+                                color: c.specialtyColor,
+                                icon: getSpecialtyIcon(c.specialtyName),
+                            }))}
+                            onHotspotSelect={(hotspot: any) => {
+                                const matched = commitments.find(c => c._id === hotspot._id);
+                                if (matched) {
+                                    handlePinClick(matched);
+                                }
+                            }}
+                            selectedHotspotId={highlightedPinId}
                             onMapClick={handleMapClick}
-                        >
-                            {commitments.map(c => (
-                                <CommitmentPin
-                                    key={c._id}
-                                    xPercent={c.coordinates.xPercent}
-                                    yPercent={c.coordinates.yPercent}
-                                    status={mapPinStatus(c.status)}
-                                    specialtyColor={c.specialtyColor}
-                                    isHighlighted={highlightedPinId === c._id}
-                                    onClick={() => handlePinClick(c)}
-                                />
-                            ))}
-                        </PlanViewer>
+                            mode="view"
+                        />
                     </div>
                 </div>
 
-                {/* Commitment Details Sidebar */}
-                {selectedCommitment && (
-                    <CommitmentDetailsSidebar
-                        commitment={selectedCommitment}
-                        floorId={floorData._id}
-                        onClose={() => {
-                            setSelectedCommitment(null);
-                            setHighlightedPinId(null);
-                            setHighlightedDay(null);
-                        }}
-                    />
-                )}
+                {/* Commitment Details Sidebar - Always Open */}
+                <CommitmentDetailsSidebar
+                    commitments={commitments}
+                    selectedCommitmentId={highlightedPinId}
+                    floorId={floorData._id}
+                    specialties={specialties}
+                    users={users}
+                    onSelectCommitment={(commitment) => {
+                        setSelectedCommitment(commitment);
+                        setHighlightedPinId(commitment._id);
+                        if (commitment.targetDate) {
+                            setHighlightedDay(commitment.targetDate);
+                        }
+                    }}
+                    onClose={() => {
+                        setSelectedCommitment(null);
+                        setHighlightedPinId(null);
+                        setHighlightedDay(null);
+                    }}
+                />
             </main>
 
             {/* New Commitment Modal */}
