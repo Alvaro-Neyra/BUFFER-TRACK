@@ -11,6 +11,7 @@ const InteractivePlanViewer = dynamic(
     () => import("@/components/organisms/InteractivePlanViewer").then((mod) => mod.InteractivePlanViewer),
     { ssr: false }
 );
+import { getSpecialtyIcon } from "@/lib/getSpecialtyIcon";
 import type { IPercentPoint } from "@/components/organisms/FreeDrawOverlay";
 import type { IBuildingWithFloors } from "@/services/project.service";
 import type { ISerializedCommitment, ISerializedSpecialty } from "../ManageProjectView";
@@ -57,10 +58,11 @@ export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, 
     const [editingBuilding, setEditingBuilding] = useState<string | null>(null);
     const [editForm, setEditForm] = useState({ name: "", code: "", number: 1, color: "#8B5CF6" });
 
-    const [newActivity, setNewActivity] = useState({ name: "", description: "", specialtyId: "", assignedTo: "", status: "In Progress" });
+    const [newActivity, setNewActivity] = useState({ name: "", customId: "", location: "", startDate: "", targetDate: "", description: "", specialtyId: "", assignedTo: "", status: "In Progress" });
     const [editingActivity, setEditingActivity] = useState<string | null>(null);
-    const [editActivityForm, setEditActivityForm] = useState({ name: "", description: "", specialtyId: "", assignedTo: "", status: "In Progress" });
+    const [editActivityForm, setEditActivityForm] = useState({ name: "", customId: "", location: "", startDate: "", targetDate: "", description: "", specialtyId: "", assignedTo: "", status: "In Progress" });
     const [selectedActivity, setSelectedActivity] = useState<string | null>(null);
+    const [focusPulse, setFocusPulse] = useState(0);
 
     // Floor form state
     const [showAddFloor, setShowAddFloor] = useState<string | null>(null);
@@ -226,7 +228,13 @@ export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, 
                 buildingId: selectedBuildingObj._id,
                 floorId: selectedFloorObj._id,
                 name: newActivity.name,
+                customId: newActivity.customId,
+                location: newActivity.location,
                 description: newActivity.description,
+                dates: {
+                    startDate: newActivity.startDate ? new Date(newActivity.startDate).toISOString() : undefined,
+                    targetDate: newActivity.targetDate ? new Date(newActivity.targetDate).toISOString() : undefined,
+                },
                 specialtyId: newActivity.specialtyId,
                 assignedTo: newActivity.assignedTo || null,
                 status: newActivity.status,
@@ -237,7 +245,7 @@ export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, 
                 setMode("view");
                 setPendingCoords(null);
                 setPendingPolygon(null);
-                setNewActivity({ name: "", description: "", specialtyId: "", assignedTo: "", status: "In Progress" });
+                setNewActivity({ name: "", customId: "", location: "", startDate: "", targetDate: "", description: "", specialtyId: "", assignedTo: "", status: "In Progress" });
                 router.refresh();
             } else alert(res.error || "Failed to create activity");
         });
@@ -247,7 +255,13 @@ export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, 
         startTransition(async () => {
             const res = await updateCommitment(activityId, {
                 name: editActivityForm.name,
+                customId: editActivityForm.customId,
+                location: editActivityForm.location,
                 description: editActivityForm.description,
+                dates: {
+                    startDate: editActivityForm.startDate ? new Date(editActivityForm.startDate).toISOString() : undefined,
+                    targetDate: editActivityForm.targetDate ? new Date(editActivityForm.targetDate).toISOString() : undefined,
+                },
                 specialtyId: editActivityForm.specialtyId,
                 assignedTo: editActivityForm.assignedTo || null,
                 status: editActivityForm.status,
@@ -414,7 +428,7 @@ export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, 
                                             name: c.name || c.description,
                                             code: c.specialtyName,
                                             color: c.specialtyColor || "#8B5CF6",
-                                            icon: "task_alt"
+                                            icon: getSpecialtyIcon(c.specialtyName)
                                         }))
                                         : buildings.map(b => ({
                                             ...b,
@@ -432,9 +446,13 @@ export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, 
                                             setPendingCoords({ x, y });
                                         }
                                     }}
+                                    focusPulse={focusPulse}
                                     onHotspotSelect={(h) => {
                                         if (!selectedFloorObj && mode === "view") {
                                             setSelectedBuilding(h._id === selectedBuilding ? null : h._id);
+                                        } else if (selectedFloorObj) {
+                                            setSelectedActivity(h._id);
+                                            setFocusPulse(p => p + 1);
                                         }
                                     }}
                                     onCreatePolygon={(pts) => {
@@ -460,8 +478,30 @@ export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, 
                                                 </span>
                                             </div>
                                             <div className="grid gap-3 mb-4">
-                                                <input type="text" placeholder="Activity Name" value={newActivity.name}
-                                                    onChange={(e) => setNewActivity({ ...newActivity, name: e.target.value })}
+                                                <div className="grid grid-cols-2 gap-3">
+                                                    <input type="text" placeholder="Activity Name" value={newActivity.name}
+                                                        onChange={(e) => setNewActivity({ ...newActivity, name: e.target.value })}
+                                                        className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-700 rounded-lg text-sm bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:ring-primary focus:border-primary" />
+                                                    <input type="text" placeholder="Custom ID (Optional)" value={newActivity.customId}
+                                                        onChange={(e) => setNewActivity({ ...newActivity, customId: e.target.value })}
+                                                        className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-700 rounded-lg text-sm bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:ring-primary focus:border-primary" />
+                                                </div>
+                                                <div className="grid grid-cols-2 gap-3">
+                                                    <div>
+                                                        <label className="block text-[10px] font-semibold text-neutral-500 uppercase tracking-wider mb-1">Start Date</label>
+                                                        <input type="date" value={newActivity.startDate}
+                                                            onChange={(e) => setNewActivity({ ...newActivity, startDate: e.target.value })}
+                                                            className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-700 rounded-lg text-sm bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:ring-primary focus:border-primary" />
+                                                    </div>
+                                                    <div>
+                                                        <label className="block text-[10px] font-semibold text-neutral-500 uppercase tracking-wider mb-1">Target End</label>
+                                                        <input type="date" value={newActivity.targetDate}
+                                                            onChange={(e) => setNewActivity({ ...newActivity, targetDate: e.target.value })}
+                                                            className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-700 rounded-lg text-sm bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:ring-primary focus:border-primary" />
+                                                    </div>
+                                                </div>
+                                                <input type="text" placeholder="Location Details (Optional)" value={newActivity.location}
+                                                    onChange={(e) => setNewActivity({ ...newActivity, location: e.target.value })}
                                                     className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-700 rounded-lg text-sm bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:ring-primary focus:border-primary" />
                                                 <textarea placeholder="Description" value={newActivity.description}
                                                     onChange={(e) => setNewActivity({ ...newActivity, description: e.target.value })}
@@ -777,13 +817,36 @@ export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, 
                             ) : (
                                 commitments.filter(c => c.floorId === selectedFloorObj._id).map(activity => (
                                     <div key={activity._id}
-                                        onClick={() => { if (editingActivity !== activity._id) setSelectedActivity(activity._id); }}
+                                        onClick={() => {
+                                            if (editingActivity !== activity._id) {
+                                                setSelectedActivity(activity._id);
+                                                setFocusPulse(p => p + 1);
+                                            }
+                                        }}
                                         className={`bg-white dark:bg-neutral-900 border ${selectedActivity === activity._id ? 'border-primary ring-1 ring-primary' : 'border-neutral-200 dark:border-neutral-800'} rounded-lg p-3 shadow-sm group cursor-pointer transition-all hover:border-primary/50`}>
 
                                         {editingActivity === activity._id ? (
                                             <div className="space-y-3" onClick={e => e.stopPropagation()}>
-                                                <input value={editActivityForm.name} onChange={(e) => setEditActivityForm({ ...editActivityForm, name: e.target.value })}
-                                                    className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-700 rounded-lg text-sm bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100" placeholder="Activity Name" />
+                                                <div className="grid grid-cols-2 gap-2">
+                                                    <input value={editActivityForm.name} onChange={(e) => setEditActivityForm({ ...editActivityForm, name: e.target.value })}
+                                                        className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-700 rounded-lg text-sm bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100" placeholder="Activity Name" />
+                                                    <input value={editActivityForm.customId} onChange={(e) => setEditActivityForm({ ...editActivityForm, customId: e.target.value })}
+                                                        className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-700 rounded-lg text-sm bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100" placeholder="Custom ID" />
+                                                </div>
+                                                <div className="grid grid-cols-2 gap-2">
+                                                    <div>
+                                                        <label className="block text-[9px] font-semibold text-neutral-500 uppercase tracking-wider mb-1">Start Date</label>
+                                                        <input type="date" value={editActivityForm.startDate} onChange={(e) => setEditActivityForm({ ...editActivityForm, startDate: e.target.value })}
+                                                            className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-700 rounded-lg text-sm bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100" />
+                                                    </div>
+                                                    <div>
+                                                        <label className="block text-[9px] font-semibold text-neutral-500 uppercase tracking-wider mb-1">Target End</label>
+                                                        <input type="date" value={editActivityForm.targetDate} onChange={(e) => setEditActivityForm({ ...editActivityForm, targetDate: e.target.value })}
+                                                            className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-700 rounded-lg text-sm bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100" />
+                                                    </div>
+                                                </div>
+                                                <input value={editActivityForm.location} onChange={(e) => setEditActivityForm({ ...editActivityForm, location: e.target.value })}
+                                                    className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-700 rounded-lg text-sm bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100" placeholder="Location Details" />
                                                 <textarea value={editActivityForm.description} onChange={(e) => setEditActivityForm({ ...editActivityForm, description: e.target.value })}
                                                     className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-700 rounded-lg text-sm bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 resize-none h-16" placeholder="Description (optional)" />
                                                 <div className="grid grid-cols-2 gap-2">
@@ -801,10 +864,10 @@ export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, 
                                                     </select>
                                                     <select value={editActivityForm.status} onChange={e => setEditActivityForm({ ...editActivityForm, status: e.target.value })}
                                                         className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-700 rounded-lg text-sm bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 col-span-2">
-                                                        <option value="In Progress">En proceso</option>
-                                                        <option value="Completed">Completado</option>
-                                                        <option value="Delayed">En retraso</option>
-                                                        <option value="Restricted">Con restricción</option>
+                                                        <option value="In Progress">In progress</option>
+                                                        <option value="Completed">Completed</option>
+                                                        <option value="Delayed">Delayed</option>
+                                                        <option value="Restricted">Restricted</option>
                                                     </select>
                                                 </div>
                                                 <div className="flex gap-2 pt-1">
@@ -836,10 +899,10 @@ export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, 
                                                                     activity.status === "Delayed" ? "bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400" :
                                                                         "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
                                                                 }`}>
-                                                                {activity.status === "In Progress" ? "En proceso" :
-                                                                    activity.status === "Completed" ? "Completado" :
-                                                                        activity.status === "Delayed" ? "En retraso" :
-                                                                            activity.status === "Restricted" ? "Con restricción" : activity.status}
+                                                                {activity.status === "In Progress" ? "In progress" :
+                                                                    activity.status === "Completed" ? "Completed" :
+                                                                        activity.status === "Delayed" ? "Delayed" :
+                                                                            activity.status === "Restricted" ? "Restricted" : activity.status}
                                                             </span>
                                                         </div>
                                                     </div>
@@ -850,6 +913,10 @@ export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, 
                                                         setEditingActivity(activity._id);
                                                         setEditActivityForm({
                                                             name: activity.name,
+                                                            customId: activity.customId || "",
+                                                            location: activity.location || "",
+                                                            startDate: activity.dates?.startDate ? new Date(activity.dates.startDate).toISOString().split('T')[0] : "",
+                                                            targetDate: activity.dates?.targetDate ? new Date(activity.dates.targetDate).toISOString().split('T')[0] : "",
                                                             description: activity.description || "",
                                                             specialtyId: activity.specialtyId,
                                                             assignedTo: activity.assignedToId || "",

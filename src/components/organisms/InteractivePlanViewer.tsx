@@ -49,6 +49,7 @@ interface IInteractivePlanViewerProps {
     pendingCoords?: { x: number; y: number } | null;
     pendingPolygon?: IPercentPoint[] | null;
     selectedHotspotId?: string | null;
+    focusPulse?: number; // Forces the view to zoom/center again onto the hotspot
 
     // Events
     onMapClick?: (xPercent: number, yPercent: number) => void;
@@ -77,6 +78,7 @@ export const InteractivePlanViewer = ({
     onCreatePolygon,
     hotspotIcon = "domain",
     hideDefaultHotspots = false,
+    focusPulse,
     children,
 }: IInteractivePlanViewerProps) => {
     const containerRef = useRef<HTMLDivElement>(null);
@@ -245,7 +247,16 @@ export const InteractivePlanViewer = ({
             event.currentTarget.releasePointerCapture(event.pointerId);
         }
 
-        if (!moved && onMapClick && containerRef.current && imageSize.width > 0 && imageSize.height > 0) {
+        // Only allow map clicks to trigger creation logic when not in pure view mode.
+        // In Master Plan (`mode="view"`), clicks should only be for pan/zoom and hotspot selection.
+        if (
+            mode !== "view" &&
+            !moved &&
+            onMapClick &&
+            containerRef.current &&
+            imageSize.width > 0 &&
+            imageSize.height > 0
+        ) {
             const rect = containerRef.current.getBoundingClientRect();
             // Mouse position relative to container
             const mouseX = event.clientX - rect.left;
@@ -468,9 +479,9 @@ export const InteractivePlanViewer = ({
         return () => {
             if (animationFrameId) cancelAnimationFrame(animationFrameId);
         };
-        // We only want this to run when selectedHotspotId changes specifically
+        // We only want this to run when selectedHotspotId or focusPulse changes specifically
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [selectedHotspotId]);
+    }, [selectedHotspotId, focusPulse]);
 
     // Cursor strategy
     const getCursor = () => {
@@ -688,7 +699,7 @@ export const InteractivePlanViewer = ({
                         className="absolute top-3 left-3 z-10 bg-white/90 dark:bg-neutral-800/90 backdrop-blur-sm rounded-md shadow-md border border-neutral-200 dark:border-neutral-700 p-2.5 max-h-48 overflow-y-auto"
                         onPointerDown={(e) => e.stopPropagation()}
                     >
-                        <h4 className="text-[9px] font-bold uppercase text-neutral-500 mb-1">Items</h4>
+                        <h4 className="text-[9px] font-bold uppercase text-neutral-500 mb-1">Commitments</h4>
                         <div className="flex flex-col gap-0.5">
                             {hotspots.slice(0, 6).map((h, idx) => (
                                 <button

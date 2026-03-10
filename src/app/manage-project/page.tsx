@@ -69,10 +69,19 @@ export default async function ManageProjectPage({
         assignedToName: c.assignedTo?.name || "Unassigned",
         requesterName: c.requesterId?.name || "Unknown",
         status: c.status,
+        startDate: c.dates?.startDate?.toISOString() || null,
         targetDate: c.dates?.targetDate?.toISOString() || null,
         requestDate: c.dates?.requestDate?.toISOString() || null,
         coordinates: c.coordinates,
         polygon: c.polygon?.map((p: any) => ({ xPercent: p.xPercent, yPercent: p.yPercent })) || undefined,
+        customId: c.customId || "",
+        location: c.location || "",
+        dates: {
+            startDate: c.dates?.startDate?.toISOString() || null,
+            targetDate: c.dates?.targetDate?.toISOString() || null,
+            requestDate: c.dates?.requestDate?.toISOString() || null,
+            actualCompletionDate: c.dates?.actualCompletionDate?.toISOString() || null,
+        }
     }));
 
     // Serialize specialties for client

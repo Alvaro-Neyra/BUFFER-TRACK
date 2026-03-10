@@ -36,10 +36,19 @@ export interface ISerializedCommitment {
     assignedToName: string;
     requesterName: string;
     status: string;
+    startDate: string | null;
     targetDate: string | null;
     requestDate: string | null;
     coordinates: { xPercent: number; yPercent: number };
     polygon?: { xPercent: number; yPercent: number }[];
+    customId?: string;
+    location?: string;
+    dates?: {
+        requestDate?: string | null;
+        startDate?: string | null;
+        targetDate?: string | null;
+        actualCompletionDate?: string | null;
+    };
 }
 
 export interface ISerializedSpecialty {

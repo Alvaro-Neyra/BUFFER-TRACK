@@ -5,9 +5,9 @@ import type { ICommitmentData } from "@/app/detail/[floorId]/DetailPlanView";
 
 interface ICalendarBarProps {
     commitments: ICommitmentData[];
-    weekStart: string;
     highlightedDay: string | null;
     onDayClick: (dateStr: string) => void;
+    onCommitmentClick?: (commitment: ICommitmentData) => void;
 }
 
 const DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
@@ -25,24 +25,30 @@ function isSameDay(a: Date, b: Date): boolean {
     return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 }
 
-export const CalendarBar = ({ commitments, weekStart, highlightedDay, onDayClick }: ICalendarBarProps) => {
-    const currentWeekDays = getWeekDays(weekStart);
-    const nextWeekStart = new Date(weekStart);
+export const CalendarBar = ({ commitments, highlightedDay, onDayClick, onCommitmentClick }: ICalendarBarProps) => {
+    // Dynamically calculate the current week's Monday
+    const today = new Date();
+    const dayOfWeek = today.getDay();
+    const diff = today.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1);
+    const currentWeekStart = new Date(today);
+    currentWeekStart.setDate(diff);
+    currentWeekStart.setHours(0, 0, 0, 0);
+
+    const currentWeekDays = getWeekDays(currentWeekStart.toISOString());
+    const nextWeekStart = new Date(currentWeekStart);
     nextWeekStart.setDate(nextWeekStart.getDate() + 7);
     const nextWeekDays = getWeekDays(nextWeekStart.toISOString());
 
-    const today = new Date();
     const highlightDate = highlightedDay ? new Date(highlightedDay) : null;
 
-    // Get dots (specialty colors) for a given day
-    const getDotsForDay = (day: Date): string[] => {
-        const colors = new Set<string>();
-        commitments.forEach(c => {
+    // Get activities for a given day
+    const getActivitiesForDay = (day: Date): ICommitmentData[] => {
+        return commitments.filter(c => {
             if (c.targetDate && isSameDay(new Date(c.targetDate), day)) {
-                colors.add(c.specialtyColor);
+                return true;
             }
-        });
-        return Array.from(colors).slice(0, 4); // Max 4 dots
+            return false;
+        }).slice(0, 4); // Max 4 dots
     };
 
     const renderWeek = (days: Date[], label: string, isNext: boolean) => (
@@ -55,13 +61,13 @@ export const CalendarBar = ({ commitments, weekStart, highlightedDay, onDayClick
                     const isToday = isSameDay(day, today);
                     const isHighlighted = highlightDate && isSameDay(day, highlightDate);
                     const isWeekend = i >= 5;
-                    const dots = getDotsForDay(day);
+                    const activities = getActivitiesForDay(day);
 
                     return (
                         <div
                             key={day.toISOString()}
                             onClick={() => onDayClick(day.toISOString())}
-                            className={`p-1 flex flex-col items-center gap-1 cursor-pointer transition-all
+                            className={`p-1 flex flex-col items-center gap-1 cursor-pointer transition-all relative
                                 ${isHighlighted ? "bg-primary/10 ring-2 ring-primary ring-inset" : ""}
                                 ${isToday && !isHighlighted ? "bg-primary/5 border-b-2 border-primary" : ""}
                                 ${isWeekend && !isHighlighted ? "bg-neutral-100/50 dark:bg-neutral-800/50" : ""}
@@ -74,10 +80,23 @@ export const CalendarBar = ({ commitments, weekStart, highlightedDay, onDayClick
                             <span className={`text-xs ${isToday ? "font-bold text-primary" : isWeekend ? "font-semibold text-neutral-400" : "font-semibold text-neutral-700 dark:text-neutral-300"}`}>
                                 {day.getDate()}
                             </span>
-                            {dots.length > 0 && (
-                                <div className="flex gap-0.5 mt-auto">
-                                    {dots.map((color, j) => (
-                                        <span key={j} className="size-1.5 rounded-full" style={{ backgroundColor: color }} />
+                            {activities.length > 0 && (
+                                <div className="flex gap-0.5 mt-auto pb-0.5">
+                                    {activities.map((activity, j) => (
+                                        <div
+                                            key={`${activity._id}-${j}`}
+                                            className="size-2 rounded-full hover:scale-150 transition-transform cursor-pointer border border-black/10 shadow-sm"
+                                            style={{ backgroundColor: activity.specialtyColor || "#8B5CF6" }}
+                                            title={activity.name || activity.description || "Activity"}
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                if (onCommitmentClick) {
+                                                    onCommitmentClick(activity);
+                                                } else {
+                                                    onDayClick(day.toISOString());
+                                                }
+                                            }}
+                                        />
                                     ))}
                                 </div>
                             )}

@@ -10,6 +10,8 @@ export interface ICommitment extends Document {
     requesterId: mongoose.Types.ObjectId;
     assignedTo?: mongoose.Types.ObjectId;
     name: string;
+    customId?: string;
+    location?: string;
     description: string;
     status: TPinStatus;
     coordinates: {
@@ -20,6 +22,7 @@ export interface ICommitment extends Document {
     polygon?: Array<{ xPercent: number; yPercent: number }>;
     dates: {
         requestDate: Date;
+        startDate?: Date;
         targetDate?: Date;
         actualCompletionDate?: Date;
     };
@@ -40,6 +43,8 @@ const CommitmentSchema: Schema = new Schema(
         requesterId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
         assignedTo: { type: Schema.Types.ObjectId, ref: 'User', index: true },
         name: { type: String, required: true },
+        customId: { type: String },
+        location: { type: String },
         description: { type: String },
         status: {
             type: String,
@@ -59,6 +64,7 @@ const CommitmentSchema: Schema = new Schema(
         }],
         dates: {
             requestDate: { type: Date, required: true, default: Date.now },
+            startDate: { type: Date },
             targetDate: { type: Date },
             actualCompletionDate: { type: Date },
         },
