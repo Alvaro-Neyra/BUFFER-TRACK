@@ -23,6 +23,9 @@ export interface IFloorData {
 
 export interface ICommitmentData {
     _id: string;
+    customId?: string;
+    location?: string;
+    name: string;
     description: string;
     status: string;
     specialtyName: string;
@@ -34,6 +37,7 @@ export interface ICommitmentData {
     requesterId: string;
     requesterName: string;
     coordinates: { xPercent: number; yPercent: number };
+    startDate: string | null;
     targetDate: string | null;
     requestDate: string | null;
     weekStart: string | null;
@@ -58,7 +62,6 @@ interface IDetailPlanViewProps {
     commitments: ICommitmentData[];
     specialties: ISpecialtyOption[];
     users: IUserOption[];
-    weekStart: string;
     currentUserId: string;
 }
 
@@ -69,24 +72,29 @@ export function DetailPlanView({
     commitments,
     specialties,
     users,
-    weekStart,
 }: IDetailPlanViewProps) {
     const [selectedCommitment, setSelectedCommitment] = useState<ICommitmentData | null>(null);
     const [showNewModal, setShowNewModal] = useState(false);
     const [newPinCoords, setNewPinCoords] = useState<{ x: number; y: number } | null>(null);
     const [highlightedPinId, setHighlightedPinId] = useState<string | null>(null);
     const [highlightedDay, setHighlightedDay] = useState<string | null>(null);
+    const [mapMode, setMapMode] = useState<"view" | "placing">("view");
+    const [focusPulse, setFocusPulse] = useState(0);
 
-    // Click on plan → open commitment creation modal
+    // Click on plan → open commitment creation modal (only if in placing mode)
     const handleMapClick = (xPercent: number, yPercent: number) => {
-        setNewPinCoords({ x: xPercent, y: yPercent });
-        setShowNewModal(true);
+        if (mapMode === "placing") {
+            setNewPinCoords({ x: xPercent, y: yPercent });
+            setShowNewModal(true);
+            setMapMode("view"); // Reset to view mode after dropping a pin
+        }
     };
 
     // Click on pin → open sidebar + highlight calendar day
     const handlePinClick = (commitment: ICommitmentData) => {
         setSelectedCommitment(commitment);
         setHighlightedPinId(commitment._id);
+        setFocusPulse(p => p + 1);
         if (commitment.targetDate) {
             setHighlightedDay(commitment.targetDate);
         }
@@ -127,9 +135,9 @@ export function DetailPlanView({
                     {/* Calendar Bar */}
                     <CalendarBar
                         commitments={commitments}
-                        weekStart={weekStart}
                         highlightedDay={highlightedDay}
                         onDayClick={handleDayClick}
+                        onCommitmentClick={handlePinClick}
                     />
 
                     {/* Plan Area */}
@@ -143,13 +151,6 @@ export function DetailPlanView({
                                     {commitments.length} commitment{commitments.length !== 1 ? "s" : ""} on this floor
                                 </p>
                             </div>
-                            <button
-                                onClick={() => { setNewPinCoords(null); setShowNewModal(true); }}
-                                className="px-4 py-2 bg-primary hover:bg-primary/90 text-white rounded-lg text-sm font-bold transition-colors shadow-sm flex items-center gap-2"
-                            >
-                                <span className="material-symbols-outlined text-sm">add_location_alt</span>
-                                Drop Pin
-                            </button>
                         </div>
 
                         <InteractivePlanViewer
@@ -168,8 +169,9 @@ export function DetailPlanView({
                                 }
                             }}
                             selectedHotspotId={highlightedPinId}
+                            focusPulse={focusPulse}
                             onMapClick={handleMapClick}
-                            mode="view"
+                            mode={mapMode}
                         />
                     </div>
                 </div>
@@ -184,6 +186,7 @@ export function DetailPlanView({
                     onSelectCommitment={(commitment) => {
                         setSelectedCommitment(commitment);
                         setHighlightedPinId(commitment._id);
+                        setFocusPulse(p => p + 1);
                         if (commitment.targetDate) {
                             setHighlightedDay(commitment.targetDate);
                         }
@@ -194,21 +197,23 @@ export function DetailPlanView({
                         setHighlightedDay(null);
                     }}
                 />
-            </main>
+            </main >
 
             {/* New Commitment Modal */}
-            {showNewModal && (
-                <NewCommitmentModal
-                    onClose={() => { setShowNewModal(false); setNewPinCoords(null); }}
-                    initialX={newPinCoords?.x}
-                    initialY={newPinCoords?.y}
-                    specialties={specialties}
-                    users={users}
-                    projectId={floorData.projectId}
-                    buildingId={floorData.buildingId}
-                    floorId={floorData._id}
-                />
-            )}
-        </div>
+            {
+                showNewModal && (
+                    <NewCommitmentModal
+                        onClose={() => { setShowNewModal(false); setNewPinCoords(null); setMapMode("view"); }}
+                        initialX={newPinCoords?.x}
+                        initialY={newPinCoords?.y}
+                        specialties={specialties}
+                        users={users}
+                        projectId={floorData.projectId}
+                        buildingId={floorData.buildingId}
+                        floorId={floorData._id}
+                    />
+                )
+            }
+        </div >
     );
 }
