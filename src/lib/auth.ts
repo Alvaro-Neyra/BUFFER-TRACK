@@ -6,14 +6,14 @@ declare module "next-auth" {
         user: {
             id: string;
             role: string;
-            projects?: { projectId: string, status: string }[];
+            projects?: { projectId: string, status: string, roleId?: string, specialtyId?: string }[];
             specialtyId?: string;
         } & DefaultSession["user"];
     }
 
     interface User {
         role?: string;
-        projects?: { projectId: string, status: string }[];
+        projects?: { projectId: string, status: string, roleId?: string, specialtyId?: string }[];
         specialtyId?: string;
     }
 }
@@ -34,7 +34,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
             if (token && session.user) {
                 session.user.id = token.id as string;
                 session.user.role = token.role as string;
-                session.user.projects = token.projects as { projectId: string, status: string }[] | undefined;
+                session.user.projects = token.projects as { projectId: string, status: string, roleId?: string, specialtyId?: string }[] | undefined;
                 session.user.specialtyId = token.specialtyId as string | undefined;
             }
             return session;

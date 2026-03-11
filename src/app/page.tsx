@@ -5,7 +5,33 @@ import connectToDatabase from "@/lib/mongodb";
 import { ProjectService } from "@/services/project.service";
 import { ProjectRepository } from "@/repositories/project.repository";
 import { CommitmentRepository } from "@/repositories/commitment.repository";
+import { roleRepository } from "@/repositories/role.repository";
 import { MasterPlanPage } from "@/components/organisms/MasterPlanPage";
+
+function asNamedEntity(value: unknown): { _id?: { toString: () => string } | string; name?: string } | null {
+  if (!value || typeof value !== "object") return null;
+  return value as { _id?: { toString: () => string } | string; name?: string };
+}
+
+function asSpecialtyEntity(value: unknown): { name?: string; colorHex?: string } | null {
+  if (!value || typeof value !== "object") return null;
+  return value as { name?: string; colorHex?: string };
+}
+
+function asBuildingEntity(value: unknown): { _id?: { toString: () => string } | string; code?: string } | null {
+  if (!value || typeof value !== "object") return null;
+  return value as { _id?: { toString: () => string } | string; code?: string };
+}
+
+function asFloorEntity(value: unknown): { _id?: { toString: () => string } | string; label?: string } | null {
+  if (!value || typeof value !== "object") return null;
+  return value as { _id?: { toString: () => string } | string; label?: string };
+}
+
+function entityIdToString(entity: { _id?: { toString: () => string } | string } | null): string {
+  if (!entity?._id) return "";
+  return typeof entity._id === "string" ? entity._id : entity._id.toString();
+}
 
 export default async function Home() {
   const session = await auth();
@@ -20,14 +46,19 @@ export default async function Home() {
 
   await connectToDatabase();
 
-  const [serializedBuildings, project, rawCommitments] = await Promise.all([
+  const membershipRolePromise = activeProject.roleId
+    ? roleRepository.getByIdInProject(activeProject.roleId, activeProject.projectId)
+    : Promise.resolve(null);
+
+  const [serializedBuildings, project, rawCommitments, membershipRole] = await Promise.all([
     ProjectService.getBuildingsForMasterPlan(),
     ProjectRepository.findById(activeProject.projectId),
     CommitmentRepository.findByProjectPopulated(activeProject.projectId),
+    membershipRolePromise,
   ]);
 
   // Filter commitments based on user role (Admin or the requester should see everything they created)
-  const isManager = session.user.role === "Admin" || session.user.role === "Project Manager" || session.user.role === "Project Director";
+  const isManager = Boolean(membershipRole?.isManager);
   const filteredCommitments = isManager
     ? rawCommitments
     : rawCommitments.filter(c =>
@@ -35,20 +66,27 @@ export default async function Home() {
       (c.requesterId && c.requesterId._id && c.requesterId._id.toString() === session.user.id)
     );
 
-  const serializedCommitments = filteredCommitments.map(c => ({
-    _id: c._id.toString(),
-    name: c.name || c.description || "Unnamed Activity",
-    status: c.status,
-    specialtyName: (c.specialtyId as any)?.name || "Unknown",
-    specialtyColor: (c.specialtyId as any)?.colorHex || "#8B5CF6",
-    assignedToName: (c.assignedTo as any)?.name || "Unassigned",
-    buildingCode: (c.buildingId as any)?.code || "",
-    buildingId: (c.buildingId as any)?._id?.toString() || "",
-    floorLabel: (c.floorId as any)?.label || "",
-    floorId: (c.floorId as any)?._id?.toString() || "",
-    isOverdue: false, // Implement logic if needed later
-    createdAt: c.createdAt ? new Date(c.createdAt).toISOString() : new Date().toISOString(),
-  }));
+  const serializedCommitments = filteredCommitments.map(c => {
+    const specialty = asSpecialtyEntity(c.specialtyId);
+    const assignedTo = asNamedEntity(c.assignedTo);
+    const building = asBuildingEntity(c.buildingId);
+    const floor = asFloorEntity(c.floorId);
+
+    return {
+      _id: c._id.toString(),
+      name: c.name || c.description || "Unnamed Activity",
+      status: c.status,
+      specialtyName: specialty?.name || "Unknown",
+      specialtyColor: specialty?.colorHex || "#8B5CF6",
+      assignedToName: assignedTo?.name || "Unassigned",
+      buildingCode: building?.code || "",
+      buildingId: entityIdToString(building),
+      floorLabel: floor?.label || "",
+      floorId: entityIdToString(floor),
+      isOverdue: false, // Implement logic if needed later
+      createdAt: c.createdAt ? new Date(c.createdAt).toISOString() : new Date().toISOString(),
+    };
+  });
 
   return (
     <MasterPlanPage

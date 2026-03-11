@@ -9,6 +9,9 @@ import { ProjectRepository } from '@/repositories/project.repository';
 import { BuildingRepository } from '@/repositories/building.repository';
 import { SpecialtyRepository } from '@/repositories/specialty.repository';
 import { UserRepository } from '@/repositories/user.repository';
+import { roleRepository } from '@/repositories/role.repository';
+import { ROLES, isManagerRole } from '@/constants/roles';
+import mongoose from 'mongoose';
 import bcrypt from 'bcryptjs';
 
 /** Result of a seed operation. */
@@ -65,7 +68,7 @@ export class SeedService {
             'Glazing', 'Topography', 'Design',
         ];
 
-        const existingSpecialties = await SpecialtyRepository.findByNames(specialtyNames);
+        const existingSpecialties = await SpecialtyRepository.findByProjectId(project._id.toString());
         const existingNames = existingSpecialties.map((s) => s.name);
 
         const specialtiesToCreate = specialtyNames
@@ -73,7 +76,7 @@ export class SeedService {
             .map((name, index) => {
                 const hue = Math.floor((index * 137.5) % 360);
                 const colorHex = `hsl(${hue}, 70%, 50%)`;
-                return { name, colorHex };
+                return { projectId: project._id, name, colorHex };
             });
 
         let specialtiesCount = existingSpecialties.length;
@@ -82,7 +85,41 @@ export class SeedService {
             specialtiesCount += inserted.length;
         }
 
-        // 4. Seed admin user from environment variables
+        // 4. Seed default roles per project (idempotent)
+        const existingRoles = await roleRepository.getByProjectId(project._id.toString());
+        const existingRoleNames = new Set(existingRoles.map((role) => role.name));
+
+        for (const roleName of ROLES) {
+            if (existingRoleNames.has(roleName)) continue;
+            await roleRepository.create({
+                projectId: new mongoose.Types.ObjectId(project._id.toString()),
+                name: roleName,
+                isManager: isManagerRole(roleName),
+                specialtiesIds: [],
+            });
+        }
+
+        const specialtiesInProject = await SpecialtyRepository.findByProjectId(project._id.toString());
+        const subcontractorRole = await roleRepository.findByNameInProject('Subcontractor', project._id.toString());
+
+        if (subcontractorRole) {
+            const targetSpecialtyIds = specialtiesInProject.map(
+                (specialty) => new mongoose.Types.ObjectId(specialty._id.toString())
+            );
+
+            const currentIds = new Set((subcontractorRole.specialtiesIds || []).map((id) => id.toString()));
+            const targetIds = new Set(targetSpecialtyIds.map((id) => id.toString()));
+            const needsSync =
+                currentIds.size !== targetIds.size || [...targetIds].some((id) => !currentIds.has(id));
+
+            if (needsSync) {
+                await roleRepository.update(subcontractorRole._id.toString(), {
+                    specialtiesIds: targetSpecialtyIds,
+                });
+            }
+        }
+
+        // 5. Seed admin user from environment variables
         const adminEmail = process.env.ADMIN_EMAIL;
         const adminPassword = process.env.ADMIN_PASSWORD;
         let adminEmailCreated: string | null = null;

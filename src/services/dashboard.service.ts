@@ -9,6 +9,7 @@
 import { CommitmentRepository } from '@/repositories/commitment.repository';
 import { RestrictionRepository } from '@/repositories/restriction.repository';
 import { UserRepository } from '@/repositories/user.repository';
+import { statusRepository } from '@/repositories/status.repository';
 import mongoose from 'mongoose';
 
 /** Input parameters for the dashboard metrics query. */
@@ -69,6 +70,13 @@ export class DashboardService {
         const nextWeekEnd = new Date(nextWeekStart.getTime() + 7 * 24 * 60 * 60 * 1000);
         const nextWeekQuery = { ...matchQuery, weekStart: { $gte: nextWeekStart, $lt: nextWeekEnd } };
 
+        // Get statuses that count for PPC
+        const allStatuses = await statusRepository.getAll();
+        const ppcStatusNames = allStatuses.filter(s => s.isPPC).map(s => s.name);
+        
+        // Default to 'Completed' if no statuses are marked as isPPC to avoid breaking dashboard
+        const ppcFilter = ppcStatusNames.length > 0 ? ppcStatusNames : ['Completed'];
+
         // 1. Overall PPC
         const overallStats = await CommitmentRepository.aggregate([
             { $match: thisWeekQuery },
@@ -76,7 +84,7 @@ export class DashboardService {
                 $group: {
                     _id: null,
                     totalCommitted: { $sum: 1 },
-                    totalCompleted: { $sum: { $cond: [{ $eq: ['$status', 'Completed'] }, 1, 0] } },
+                    totalCompleted: { $sum: { $cond: [{ $in: ['$status', ppcFilter] }, 1, 0] } },
                 },
             },
         ]);
@@ -90,7 +98,7 @@ export class DashboardService {
         // 2A. PPC by Specialty
         const ppcBySpecialty = await CommitmentRepository.aggregate([
             { $match: thisWeekQuery },
-            { $group: { _id: '$specialtyId', total: { $sum: 1 }, completed: { $sum: { $cond: [{ $eq: ['$status', 'Completed'] }, 1, 0] } } } },
+            { $group: { _id: '$specialtyId', total: { $sum: 1 }, completed: { $sum: { $cond: [{ $in: ['$status', ppcFilter] }, 1, 0] } } } },
             { $lookup: { from: 'specialties', localField: '_id', foreignField: '_id', as: 'specialty' } },
             { $unwind: { path: '$specialty', preserveNullAndEmptyArrays: true } },
             { $project: { name: { $ifNull: ['$specialty.name', 'Unknown'] }, color: { $ifNull: ['$specialty.color', '#cbd5e1'] }, ppc: { $round: [{ $multiply: [{ $divide: ['$completed', '$total'] }, 100] }, 0] }, total: 1, completed: 1 } },
@@ -100,7 +108,7 @@ export class DashboardService {
         // 2B. PPC by Subcontractor
         const ppcBySubcontractor = await CommitmentRepository.aggregate([
             { $match: { ...thisWeekQuery, assignedTo: { $exists: true, $ne: null } } },
-            { $group: { _id: '$assignedTo', total: { $sum: 1 }, completed: { $sum: { $cond: [{ $eq: ['$status', 'Completed'] }, 1, 0] } } } },
+            { $group: { _id: '$assignedTo', total: { $sum: 1 }, completed: { $sum: { $cond: [{ $in: ['$status', ppcFilter] }, 1, 0] } } } },
             { $lookup: { from: 'users', localField: '_id', foreignField: '_id', as: 'user' } },
             { $unwind: { path: '$user', preserveNullAndEmptyArrays: true } },
             { $project: { name: { $concat: ['$user.firstName', ' ', '$user.lastName'] }, company: { $ifNull: ['$user.companyName', 'N/A'] }, ppc: { $round: [{ $multiply: [{ $divide: ['$completed', '$total'] }, 100] }, 0] }, total: 1, completed: 1 } },
@@ -110,7 +118,7 @@ export class DashboardService {
         // 2C. PPC by Zone (Floor)
         const ppcByZone = await CommitmentRepository.aggregate([
             { $match: thisWeekQuery },
-            { $group: { _id: '$floorId', total: { $sum: 1 }, completed: { $sum: { $cond: [{ $eq: ['$status', 'Completed'] }, 1, 0] } } } },
+            { $group: { _id: '$floorId', total: { $sum: 1 }, completed: { $sum: { $cond: [{ $in: ['$status', ppcFilter] }, 1, 0] } } } },
             { $lookup: { from: 'floors', localField: '_id', foreignField: '_id', as: 'floor' } },
             { $unwind: { path: '$floor', preserveNullAndEmptyArrays: true } },
             { $project: { level: { $ifNull: ['$floor.level', 'Unknown Level'] }, ppc: { $round: [{ $multiply: [{ $divide: ['$completed', '$total'] }, 100] }, 0] }, total: 1, completed: 1 } },

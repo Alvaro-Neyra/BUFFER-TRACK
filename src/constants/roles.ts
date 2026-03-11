@@ -49,4 +49,4 @@ export function isManagerRole(role: string | undefined | null): boolean {
 export type TProjectStatus = 'Pending' | 'Active';
 
 /** Commitment pin statuses for the plan viewer. */
-export type TPinStatus = 'In Progress' | 'Completed' | 'Delayed' | 'Restricted';
+export type TPinStatus = string;

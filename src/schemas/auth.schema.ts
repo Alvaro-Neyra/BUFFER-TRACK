@@ -9,12 +9,11 @@
 // ------------------------------------------------------------------
 
 import { z } from 'zod';
-import { ROLES } from '@/constants/roles';
 
 /**
  * Schema for the user registration endpoint.
  * Validates all required fields and enforces business rules
- * (e.g., specialtyId required for Subcontractors).
+ * (e.g., specialtyId required when role has configured specialties).
  */
 export const registerSchema = z.object({
     name: z
@@ -30,9 +29,12 @@ export const registerSchema = z.object({
     password: z
         .string({ error: 'Password is required' })
         .min(6, 'Password must be at least 6 characters'),
-    role: z.enum([...ROLES], {
-        error: 'Invalid role selected',
-    }),
+    roleId: z
+        .string({ error: 'Role is required' })
+        .min(1, 'Role is required')
+        .refine((val) => /^[0-9a-fA-F]{24}$/.test(val), {
+            message: 'Invalid role id',
+        }),
     projectId: z
         .string({ error: 'Project ID is required' })
         .refine(
@@ -47,10 +49,7 @@ export const registerSchema = z.object({
     specialtyId: z
         .string()
         .optional(),
-}).refine(
-    (data) => data.role !== 'Subcontractor' || !!data.specialtyId,
-    { message: 'Specialty is required for Subcontractors', path: ['specialtyId'] }
-);
+});
 
 /** Inferred TypeScript type from the register schema. */
 export type TRegisterInput = z.infer<typeof registerSchema>;

@@ -2,7 +2,7 @@
 
 import { auth } from "@/lib/auth";
 import connectToDatabase from "@/lib/mongodb";
-import { isManagerRole } from "@/constants/roles";
+import { roleRepository } from "@/repositories/role.repository";
 import { UserAdminService } from "@/services/userAdmin.service";
 import { revalidatePath } from "next/cache";
 
@@ -10,8 +10,19 @@ export async function handleUserProjectAccess(userId: string, projectId: string,
     const session = await auth();
     if (!session?.user) throw new Error("Unauthorized");
 
-    // Verify if the caller is a Manager
-    if (!isManagerRole(session.user.role)) {
+    const membership = session.user.projects?.find(
+        (project) => project.projectId === projectId && project.status === "Active"
+    );
+    if (!membership) {
+        throw new Error("Unauthorized");
+    }
+
+    const membershipRole = membership.roleId
+        ? await roleRepository.getByIdInProject(membership.roleId, projectId)
+        : null;
+    const canManage = Boolean(membershipRole?.isManager);
+
+    if (!canManage) {
         throw new Error("Forbidden: You do not have permission to manage users");
     }
 

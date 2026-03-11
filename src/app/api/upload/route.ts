@@ -9,18 +9,39 @@ import { NextResponse } from 'next/server';
 import { writeFile, mkdir } from 'fs/promises';
 import path from 'path';
 import { auth } from '@/lib/auth';
-import { isManagerRole } from '@/constants/roles';
+import { roleRepository } from '@/repositories/role.repository';
+import mongoose from 'mongoose';
 
 export async function POST(req: Request) {
     try {
         // Auth check
         const session = await auth();
-        if (!session?.user || !isManagerRole(session.user.role)) {
+        if (!session?.user) {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
         }
 
         const formData = await req.formData();
         const file = formData.get('file') as File | null;
+        const projectId = formData.get('projectId');
+
+        if (typeof projectId !== 'string' || !mongoose.isValidObjectId(projectId)) {
+            return NextResponse.json({ error: 'Invalid project id' }, { status: 400 });
+        }
+
+        const membership = session.user.projects?.find(
+            (project) => project.projectId === projectId && project.status === 'Active'
+        );
+        if (!membership) {
+            return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
+        }
+
+        const membershipRole = membership.roleId
+            ? await roleRepository.getByIdInProject(membership.roleId, projectId)
+            : null;
+        const canUpload = Boolean(membershipRole?.isManager);
+        if (!canUpload) {
+            return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+        }
 
         if (!file) {
             return NextResponse.json({ error: 'No file provided' }, { status: 400 });

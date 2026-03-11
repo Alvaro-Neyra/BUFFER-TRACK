@@ -1,6 +1,6 @@
 import mongoose, { Schema, Document } from 'mongoose';
 
-export type TPinStatus = 'Request' | 'Notified' | 'Committed' | 'In Progress' | 'Completed' | 'Delayed' | 'Restricted';
+export type TPinStatus = string;
 
 export interface ICommitment extends Document {
     projectId: mongoose.Types.ObjectId;
@@ -48,7 +48,6 @@ const CommitmentSchema: Schema = new Schema(
         description: { type: String },
         status: {
             type: String,
-            enum: ['Request', 'Notified', 'Committed', 'In Progress', 'Completed', 'Delayed', 'Restricted'],
             default: 'Request',
             required: true,
         },
