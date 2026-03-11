@@ -6,7 +6,11 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "migrate:memberships": "node scripts/backfill-project-memberships.mjs",
+    "migrate:memberships:dry": "node scripts/backfill-project-memberships.mjs --dry-run",
+    "sync:subcontractor-specialties:dry": "node scripts/sync-subcontractor-specialties.mjs",
+    "sync:subcontractor-specialties": "node scripts/sync-subcontractor-specialties.mjs --apply"
   },
   "dependencies": {
     "@panzoom/panzoom": "^4.6.1",

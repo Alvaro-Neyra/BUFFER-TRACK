@@ -88,6 +88,30 @@ npm test
 npx jest --testNamePattern="<test-name>"
 ```
 
+## 🧰 Membership Migration
+
+Use this one-time migration to backfill missing per-project membership fields (`projects[].roleId`, `projects[].specialtyId`) from legacy user fields.
+
+```bash
+# Preview changes without writing
+npm run migrate:memberships:dry
+
+# Apply migration
+npm run migrate:memberships
+```
+
+## 🧰 Subcontractor Specialty Sync
+
+Use this maintenance script to link all project specialties to the `Subcontractor` role and backfill missing `specialties.projectId` values when legacy data is unscoped.
+
+```bash
+# Preview for a project
+npm run sync:subcontractor-specialties:dry -- --project-id <projectObjectId>
+
+# Apply for a project
+npm run sync:subcontractor-specialties -- --project-id <projectObjectId>
+```
+
 ## 📄 License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
