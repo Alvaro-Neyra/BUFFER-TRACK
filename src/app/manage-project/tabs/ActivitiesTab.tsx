@@ -1,27 +1,38 @@
 "use client";
 
-import React, { useState } from "react";
-import type { ISerializedCommitment, ISerializedSpecialty } from "../ManageProjectView";
+import React, { useState, useTransition } from "react";
+import type { IUserDTO, ISpecialtyDTO, IStatusDTO, IRoleDTO } from "@/types/models";
+import { deleteCommitment } from "../actions";
+import { ManageStatusesModal } from "@/components/organisms/ManageStatusesModal";
+import { ManageSpecialtiesModal } from "@/components/organisms/ManageSpecialtiesModal";
+import { ManageRolesModal } from "@/components/organisms/ManageRolesModal";
+import { EditActivityModal } from "@/components/organisms/EditActivityModal";
+import { ConfirmModal } from "@/components/organisms/ConfirmModal";
+import { AlertModal } from "@/components/organisms/AlertModal";
+import type { ISerializedCommitment } from "../ManageProjectView";
 
 interface IActivitiesTabProps {
     commitments: ISerializedCommitment[];
-    specialties: ISerializedSpecialty[];
+    specialties: ISpecialtyDTO[];
+    statuses: IStatusDTO[];
+    roles: IRoleDTO[];
+    users: IUserDTO[];
+    currentProjectId: string;
 }
 
-const STATUS_COLORS: Record<string, { bg: string; text: string }> = {
-    Request: { bg: "bg-blue-50 dark:bg-blue-900/20", text: "text-blue-600 dark:text-blue-400" },
-    Notified: { bg: "bg-indigo-50 dark:bg-indigo-900/20", text: "text-indigo-600 dark:text-indigo-400" },
-    Committed: { bg: "bg-cyan-50 dark:bg-cyan-900/20", text: "text-cyan-600 dark:text-cyan-400" },
-    "In Progress": { bg: "bg-amber-50 dark:bg-amber-900/20", text: "text-amber-600 dark:text-amber-400" },
-    Completed: { bg: "bg-emerald-50 dark:bg-emerald-900/20", text: "text-emerald-600 dark:text-emerald-400" },
-    Delayed: { bg: "bg-rose-50 dark:bg-rose-900/20", text: "text-rose-600 dark:text-rose-400" },
-    Restricted: { bg: "bg-orange-50 dark:bg-orange-900/20", text: "text-orange-600 dark:text-orange-400" },
-};
-
-export function ActivitiesTab({ commitments, specialties }: IActivitiesTabProps) {
+export function ActivitiesTab({ commitments, specialties, statuses, roles, users, currentProjectId }: IActivitiesTabProps) {
+    const [, startTransition] = useTransition();
     const [filterStatus, setFilterStatus] = useState<string>("all");
     const [filterSpecialty, setFilterSpecialty] = useState<string>("all");
     const [search, setSearch] = useState("");
+
+    // Modal states
+    const [showStatusesModal, setShowStatusesModal] = useState(false);
+    const [showSpecialtiesModal, setShowSpecialtiesModal] = useState(false);
+    const [showRolesModal, setShowRolesModal] = useState(false);
+    const [editingCommitment, setEditingCommitment] = useState<ISerializedCommitment | null>(null);
+    const [deletingCommitmentId, setDeletingCommitmentId] = useState<string | null>(null);
+    const [alert, setAlert] = useState<{ isOpen: boolean; title: string; message: string; type: 'success' | 'error' } | null>(null);
 
     const filteredCommitments = commitments.filter((c) => {
         if (filterStatus !== "all" && c.status !== filterStatus) return false;
@@ -32,17 +43,34 @@ export function ActivitiesTab({ commitments, specialties }: IActivitiesTabProps)
                 c.buildingName.toLowerCase().includes(q) ||
                 c.floorLabel.toLowerCase().includes(q) ||
                 c.assignedToName.toLowerCase().includes(q) ||
-                c.specialtyName.toLowerCase().includes(q)
+                c.specialtyName.toLowerCase().includes(q) ||
+                c.description.toLowerCase().includes(q)
             );
         }
         return true;
     });
 
-    const allStatuses = ["Request", "Notified", "Committed", "In Progress", "Completed", "Delayed", "Restricted"];
+    const getStatusColor = (statusName: string) => {
+        const found = statuses.find(s => s.name === statusName);
+        return found?.colorHex || "#94a3b8"; // Default slate-400
+    };
+
+    const handleDelete = async () => {
+        if (!deletingCommitmentId) return;
+        startTransition(async () => {
+            const res = await deleteCommitment(deletingCommitmentId);
+            if (res.success) {
+                setDeletingCommitmentId(null);
+            } else {
+                setAlert({ isOpen: true, title: "Error", message: res.error || "Failed to delete activity", type: 'error' });
+                setDeletingCommitmentId(null);
+            }
+        });
+    };
 
     return (
         <div className="space-y-6">
-            {/* Filters */}
+            {/* Filters & Actions */}
             <div className="flex flex-wrap gap-3 items-center">
                 <div className="relative">
                     <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400 text-sm">search</span>
@@ -55,16 +83,37 @@ export function ActivitiesTab({ commitments, specialties }: IActivitiesTabProps)
                 <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}
                     className="px-3 py-2 border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 rounded-lg text-sm text-neutral-900 dark:text-neutral-100 focus:ring-primary focus:border-primary shadow-sm">
                     <option value="all">All Statuses</option>
-                    {allStatuses.map((s) => (<option key={s} value={s}>{s}</option>))}
+                    {statuses.map((s) => (<option key={s._id} value={s.name}>{s.name}</option>))}
                 </select>
                 <select value={filterSpecialty} onChange={(e) => setFilterSpecialty(e.target.value)}
                     className="px-3 py-2 border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 rounded-lg text-sm text-neutral-900 dark:text-neutral-100 focus:ring-primary focus:border-primary shadow-sm">
                     <option value="all">All Specialties</option>
                     {specialties.map((s) => (<option key={s._id} value={s.name}>{s.name}</option>))}
                 </select>
-                <span className="text-sm text-neutral-500 ml-auto font-medium">
-                    {filteredCommitments.length} activit{filteredCommitments.length === 1 ? "y" : "ies"}
-                </span>
+
+                <div className="flex gap-2 ml-auto">
+                    <button
+                        onClick={() => setShowStatusesModal(true)}
+                        className="flex items-center gap-2 px-3 py-2 text-xs font-bold text-neutral-600 dark:text-neutral-300 hover:bg-neutral-200 dark:hover:bg-neutral-800 rounded-lg border border-neutral-300 dark:border-neutral-700 transition-colors"
+                    >
+                        <span className="material-symbols-outlined text-sm">settings</span>
+                        Statuses
+                    </button>
+                    <button
+                        onClick={() => setShowSpecialtiesModal(true)}
+                        className="flex items-center gap-2 px-3 py-2 text-xs font-bold text-neutral-600 dark:text-neutral-300 hover:bg-neutral-200 dark:hover:bg-neutral-800 rounded-lg border border-neutral-300 dark:border-neutral-700 transition-colors"
+                    >
+                        <span className="material-symbols-outlined text-sm">palette</span>
+                        Specialties
+                    </button>
+                    <button
+                        onClick={() => setShowRolesModal(true)}
+                        className="flex items-center gap-2 px-3 py-2 text-xs font-bold text-neutral-600 dark:text-neutral-300 hover:bg-neutral-200 dark:hover:bg-neutral-800 rounded-lg border border-neutral-300 dark:border-neutral-700 transition-colors"
+                    >
+                        <span className="material-symbols-outlined text-sm">badge</span>
+                        Roles
+                    </button>
+                </div>
             </div>
 
             {/* Activities Table */}
@@ -86,13 +135,14 @@ export function ActivitiesTab({ commitments, specialties }: IActivitiesTabProps)
                                     <th className="px-5 py-3.5">Assigned To</th>
                                     <th className="px-5 py-3.5">Status</th>
                                     <th className="px-5 py-3.5">Target Date</th>
+                                    <th className="px-5 py-3.5 text-right">Actions</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-neutral-200 dark:divide-neutral-800 font-medium">
                                 {filteredCommitments.map((c) => {
-                                    const statusStyle = STATUS_COLORS[c.status] || STATUS_COLORS.Request;
+                                    const statusColor = getStatusColor(c.status);
                                     return (
-                                        <tr key={c._id} className="hover:bg-neutral-50/50 dark:hover:bg-neutral-800/30 transition-colors">
+                                        <tr key={c._id} className="hover:bg-neutral-50/50 dark:hover:bg-neutral-800/30 transition-colors group">
                                             <td className="px-5 py-3.5">
                                                 <span className="font-semibold text-neutral-900 dark:text-white">{c.buildingName}</span>
                                                 <span className="text-xs text-neutral-400 ml-1.5">{c.buildingCode}</span>
@@ -106,12 +156,25 @@ export function ActivitiesTab({ commitments, specialties }: IActivitiesTabProps)
                                             </td>
                                             <td className="px-5 py-3.5">{c.assignedToName}</td>
                                             <td className="px-5 py-3.5">
-                                                <span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-bold ${statusStyle.bg} ${statusStyle.text}`}>
-                                                    {c.status === "Restricted" && "⚠️ "}{c.status}
-                                                </span>
+                                                <div className="flex items-center gap-2">
+                                                    <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: statusColor }}></div>
+                                                    <span className="text-xs font-bold text-neutral-700 dark:text-neutral-200 uppercase tracking-tight">
+                                                        {c.status}
+                                                    </span>
+                                                </div>
                                             </td>
                                             <td className="px-5 py-3.5 text-neutral-500">
                                                 {c.targetDate ? new Date(c.targetDate).toLocaleDateString() : "—"}
+                                            </td>
+                                            <td className="px-5 py-3.5 text-right">
+                                                <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                    <button onClick={() => setEditingCommitment(c)} className="p-1.5 text-neutral-400 hover:text-primary transition-colors">
+                                                        <span className="material-symbols-outlined text-lg">edit</span>
+                                                    </button>
+                                                    <button onClick={() => setDeletingCommitmentId(c._id)} className="p-1.5 text-neutral-400 hover:text-red-500 transition-colors">
+                                                        <span className="material-symbols-outlined text-lg">delete</span>
+                                                    </button>
+                                                </div>
                                             </td>
                                         </tr>
                                     );
@@ -121,6 +184,57 @@ export function ActivitiesTab({ commitments, specialties }: IActivitiesTabProps)
                     </div>
                 )}
             </div>
+
+            {/* Modals */}
+            {showStatusesModal && (
+                <ManageStatusesModal
+                    statuses={statuses}
+                    currentProjectId={currentProjectId}
+                    onClose={() => setShowStatusesModal(false)}
+                />
+            )}
+            {showSpecialtiesModal && (
+                <ManageSpecialtiesModal
+                    specialties={specialties}
+                    currentProjectId={currentProjectId}
+                    onClose={() => setShowSpecialtiesModal(false)}
+                />
+            )}
+            {showRolesModal && (
+                <ManageRolesModal
+                    roles={roles}
+                    specialties={specialties}
+                    currentProjectId={currentProjectId}
+                    onClose={() => setShowRolesModal(false)}
+                />
+            )}
+            {editingCommitment && (
+                <EditActivityModal
+                    commitment={editingCommitment}
+                    specialties={specialties}
+                    statuses={statuses}
+                    users={users}
+                    onClose={() => setEditingCommitment(null)}
+                />
+            )}
+            <ConfirmModal
+                isOpen={!!deletingCommitmentId}
+                title="Delete Activity"
+                message="Are you sure you want to delete this activity? This cannot be undone."
+                onConfirm={handleDelete}
+                onCancel={() => setDeletingCommitmentId(null)}
+                confirmLabel="Delete"
+                isDanger
+            />
+            {alert && (
+                <AlertModal
+                    isOpen={alert.isOpen}
+                    title={alert.title}
+                    message={alert.message}
+                    type={alert.type}
+                    onClose={() => setAlert(null)}
+                />
+            )}
         </div>
     );
 }

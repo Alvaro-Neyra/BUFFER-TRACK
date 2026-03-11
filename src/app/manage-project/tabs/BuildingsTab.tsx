@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useTransition, useRef, useEffect, useCallback } from "react";
+import React, { useState, useTransition, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { createBuilding, updateBuilding, deleteBuilding, createFloor, deleteFloor, updateMasterPlanImage, createCommitment, updateCommitment, deleteCommitment } from "../actions";
@@ -14,8 +14,8 @@ const InteractivePlanViewer = dynamic(
 import { getSpecialtyIcon } from "@/lib/getSpecialtyIcon";
 import type { IPercentPoint } from "@/components/organisms/FreeDrawOverlay";
 import type { IBuildingWithFloors } from "@/services/project.service";
-import type { ISerializedCommitment, ISerializedSpecialty } from "../ManageProjectView";
-import type { IUserDTO } from "@/types/models";
+import type { ISerializedCommitment } from "../ManageProjectView";
+import type { IUserDTO, ISpecialtyDTO, IStatusDTO } from "@/types/models";
 
 interface IBuildingsTabProps {
     buildings: IBuildingWithFloors[];
@@ -23,16 +23,16 @@ interface IBuildingsTabProps {
     masterPlanImageUrl: string;
     commitmentCounts: Record<string, number>; // buildingId → count
     commitments: ISerializedCommitment[];
-    specialties: ISerializedSpecialty[];
+    specialties: ISpecialtyDTO[];
+    statuses: IStatusDTO[];
     activeUsers: IUserDTO[];
 }
 
 type TMode = "view" | "placing" | "drawing";
 
-export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, commitmentCounts, commitments, specialties, activeUsers }: IBuildingsTabProps) {
+export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, commitmentCounts, commitments, specialties, statuses, activeUsers }: IBuildingsTabProps) {
     const router = useRouter();
     const [isPending, startTransition] = useTransition();
-    const planContainerRef = useRef<HTMLDivElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const masterPlanFileRef = useRef<HTMLInputElement>(null);
 
@@ -48,6 +48,9 @@ export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, 
     const selectedBuildingObj = buildings.find(b => b._id === selectedBuilding);
     const selectedFloorObj = selectedBuildingObj?.floors.find(f => f._id === selectedFloor);
 
+    // Default status from dynamic list or fallback
+    const defaultStatus = statuses.length > 0 ? statuses[0].name : "Request";
+
     // Build form state
     const [newBuilding, setNewBuilding] = useState({ name: "", code: "", number: 1 });
     const [newBuildingColor, setNewBuildingColor] = useState("#8B5CF6");
@@ -58,11 +61,17 @@ export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, 
     const [editingBuilding, setEditingBuilding] = useState<string | null>(null);
     const [editForm, setEditForm] = useState({ name: "", code: "", number: 1, color: "#8B5CF6" });
 
-    const [newActivity, setNewActivity] = useState({ name: "", customId: "", location: "", startDate: "", targetDate: "", description: "", specialtyId: "", assignedTo: "", status: "In Progress" });
+    const [newActivity, setNewActivity] = useState({ name: "", customId: "", location: "", startDate: "", targetDate: "", description: "", specialtyId: "", assignedTo: "", status: defaultStatus });
     const [editingActivity, setEditingActivity] = useState<string | null>(null);
-    const [editActivityForm, setEditActivityForm] = useState({ name: "", customId: "", location: "", startDate: "", targetDate: "", description: "", specialtyId: "", assignedTo: "", status: "In Progress" });
+    const [editActivityForm, setEditActivityForm] = useState({ name: "", customId: "", location: "", startDate: "", targetDate: "", description: "", specialtyId: "", assignedTo: "", status: defaultStatus });
     const [selectedActivity, setSelectedActivity] = useState<string | null>(null);
     const [focusPulse, setFocusPulse] = useState(0);
+
+    // Helpers
+    const getStatusColor = (statusName: string) => {
+        const found = statuses.find(s => s.name === statusName);
+        return found?.colorHex || "#94a3b8"; // Default slate-400
+    };
 
     // Floor form state
     const [showAddFloor, setShowAddFloor] = useState<string | null>(null);
@@ -85,6 +94,7 @@ export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, 
             // Upload the compressed file
             const formData = new FormData();
             formData.append("file", result.file);
+            formData.append("projectId", currentProjectId);
             const res = await fetch("/api/upload", { method: "POST", body: formData });
             const json = await res.json();
 
@@ -130,19 +140,6 @@ export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, 
             setUploading(false);
             setTimeout(() => setCompressionInfo(null), 8000);
         }
-    };
-
-    // ─── Plan click handler ──────────────────────────────────────
-
-    const handlePlanClick = (e: React.MouseEvent<HTMLDivElement>) => {
-        if (mode !== "placing") return;
-        if (!planContainerRef.current) return;
-        if ((e.target as HTMLElement).closest("[data-building-marker]")) return;
-
-        const rect = planContainerRef.current.getBoundingClientRect();
-        const x = ((e.clientX - rect.left) / rect.width) * 100;
-        const y = ((e.clientY - rect.top) / rect.height) * 100;
-        setPendingCoords({ x, y });
     };
 
     // ─── CRUD handlers ───────────────────────────────────────────
@@ -283,7 +280,6 @@ export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, 
 
     const selected = selectedBuildingObj;
     const COLOR_OPTIONS = ["#8B5CF6", "#3B82F6", "#F59E0B", "#10B981", "#EC4899", "#06B6D4", "#EF4444", "#64748B"];
-    const ACTIVITY_STATUSES = ["Request", "Notified", "Committed", "In Progress", "Completed", "Delayed", "Restricted"];
 
     return (
         <div className="flex flex-col lg:flex-row gap-6 h-full min-h-[600px]">
@@ -527,10 +523,9 @@ export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, 
                                                 </select>
                                                 <select value={newActivity.status} onChange={e => setNewActivity({ ...newActivity, status: e.target.value })}
                                                     className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-700 rounded-lg text-sm bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:ring-primary focus:border-primary col-span-2">
-                                                    <option value="In Progress">In Progress</option>
-                                                    <option value="Completed">Completed</option>
-                                                    <option value="Delayed">Delayed</option>
-                                                    <option value="Restricted">Restricted</option>
+                                                    {statuses.map(s => (
+                                                        <option key={s._id} value={s.name}>{s.name}</option>
+                                                    ))}
                                                 </select>
                                             </div>
                                             <div className="flex gap-2">
@@ -812,7 +807,7 @@ export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, 
                                 <div className="flex flex-col items-center justify-center py-8 text-neutral-500 bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-800">
                                     <span className="material-symbols-outlined text-3xl mb-2 text-neutral-300">task_alt</span>
                                     <p className="text-sm font-medium">No activities</p>
-                                    <p className="text-xs mt-1 text-center">Select "Place Pin" and click on<br />the plan to add an activity</p>
+                                    <p className="text-xs mt-1 text-center">Select &quot;Place Pin&quot; and click on<br />the plan to add an activity</p>
                                 </div>
                             ) : (
                                 commitments.filter(c => c.floorId === selectedFloorObj._id).map(activity => (
@@ -864,10 +859,9 @@ export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, 
                                                     </select>
                                                     <select value={editActivityForm.status} onChange={e => setEditActivityForm({ ...editActivityForm, status: e.target.value })}
                                                         className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-700 rounded-lg text-sm bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 col-span-2">
-                                                        <option value="In Progress">In progress</option>
-                                                        <option value="Completed">Completed</option>
-                                                        <option value="Delayed">Delayed</option>
-                                                        <option value="Restricted">Restricted</option>
+                                                        {statuses.map(s => (
+                                                            <option key={s._id} value={s.name}>{s.name}</option>
+                                                        ))}
                                                     </select>
                                                 </div>
                                                 <div className="flex gap-2 pt-1">
@@ -894,15 +888,11 @@ export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, 
                                                                     {activeUsers.find(u => u._id === activity.assignedToId)?.name.split(' ')[0]}
                                                                 </span>
                                                             )}
-                                                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${activity.status === "Completed" ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400" :
-                                                                activity.status === "In Progress" ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400" :
-                                                                    activity.status === "Delayed" ? "bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400" :
-                                                                        "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
-                                                                }`}>
-                                                                {activity.status === "In Progress" ? "In progress" :
-                                                                    activity.status === "Completed" ? "Completed" :
-                                                                        activity.status === "Delayed" ? "Delayed" :
-                                                                            activity.status === "Restricted" ? "Restricted" : activity.status}
+                                                            <span className="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-tight" style={{ 
+                                                                backgroundColor: `${getStatusColor(activity.status)}20`, // 20 hex = ~12% opacity
+                                                                color: getStatusColor(activity.status)
+                                                            }}>
+                                                                {activity.status}
                                                             </span>
                                                         </div>
                                                     </div>

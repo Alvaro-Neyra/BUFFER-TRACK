@@ -17,7 +17,6 @@ import { FloorSelectorModal } from "@/components/organisms/FloorSelectorModal";
 import { FreeDrawOverlay } from "@/components/organisms/FreeDrawOverlay";
 import type { IPercentPoint } from "@/components/organisms/FreeDrawOverlay";
 import { PixelGridOverlay } from "@/components/atoms/PixelGridOverlay";
-import { MasterPlanHotspot } from "@/components/atoms/MasterPlanHotspot";
 
 export type TViewerMode = "view" | "placing" | "drawing";
 
@@ -592,6 +591,24 @@ export const InteractivePlanViewer = ({
                         </div>
                     )}
 
+                    {/* Pending polygon preview while drawing */}
+                    {mode === "drawing" && pendingPolygon && pendingPolygon.length >= 2 && imageSize.width > 0 && imageSize.height > 0 && (
+                        <svg
+                            className="absolute inset-0 z-20 pointer-events-none"
+                            viewBox={`0 0 ${imageSize.width} ${imageSize.height}`}
+                            preserveAspectRatio="none"
+                        >
+                            <polygon
+                                points={pendingPolygon
+                                    .map((point) => `${(point.xPercent / 100) * imageSize.width},${(point.yPercent / 100) * imageSize.height}`)
+                                    .join(" ")}
+                                fill="rgba(16, 185, 129, 0.18)"
+                                stroke="#10B981"
+                                strokeWidth={Math.max(1, 2 / Math.max(view.scale, 1))}
+                            />
+                        </svg>
+                    )}
+
                     {!hideDefaultHotspots && hotspots.map((hotspot, idx) => (
                         <div
                             key={hotspot._id}
@@ -660,6 +677,12 @@ export const InteractivePlanViewer = ({
                             </div>
                         </div>
                     ))}
+
+                    {children && (
+                        <div className="absolute inset-0 z-30 pointer-events-auto">
+                            {children}
+                        </div>
+                    )}
                 </div>
 
                 {/* UI Controls */}
@@ -717,7 +740,7 @@ export const InteractivePlanViewer = ({
                                             backgroundColor: h.color || POLY_COLORS[idx % POLY_COLORS.length],
                                         }}
                                     />
-                                    <span className="text-[10px] text-neutral-700 dark:text-neutral-300 truncate max-w-[120px]">{h.name || h.description || h.code}</span>
+                                    <span className="text-[10px] text-neutral-700 dark:text-neutral-300 truncate max-w-30">{h.name}</span>
                                 </button>
                             ))}
                         </div>

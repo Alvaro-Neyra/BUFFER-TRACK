@@ -3,32 +3,32 @@
 import React, { useTransition, useState } from "react";
 import { useRouter } from "next/navigation";
 import { updateCommitmentStatus, updateCommitmentDetails } from "@/app/detail/[floorId]/actions";
-import type { ICommitmentData, ISpecialtyOption, IUserOption } from "@/app/detail/[floorId]/DetailPlanView";
-
-const STATUS_COLORS: Record<string, { bg: string; text: string; label: string }> = {
-    Request: { bg: "bg-blue-100 dark:bg-blue-900/30", text: "text-blue-600 dark:text-blue-400", label: "Request" },
-    Notified: { bg: "bg-indigo-100 dark:bg-indigo-900/30", text: "text-indigo-600 dark:text-indigo-400", label: "Notified" },
-    Committed: { bg: "bg-cyan-100 dark:bg-cyan-900/30", text: "text-cyan-600 dark:text-cyan-400", label: "Committed" },
-    "In Progress": { bg: "bg-amber-100 dark:bg-amber-900/30", text: "text-amber-600 dark:text-amber-400", label: "In Progress" },
-    Completed: { bg: "bg-emerald-100 dark:bg-emerald-900/30", text: "text-emerald-600 dark:text-emerald-400", label: "Completed" },
-    Delayed: { bg: "bg-rose-100 dark:bg-rose-900/30", text: "text-rose-600 dark:text-rose-400", label: "Delayed" },
-    Restricted: { bg: "bg-orange-100 dark:bg-orange-900/30", text: "text-orange-600 dark:text-orange-400", label: "⚠️ Restricted" },
-};
+import type { ICommitmentData, IStatusOption } from "@/app/detail/[floorId]/DetailPlanView";
 
 interface ICommitmentDetailsSidebarProps {
     commitments: ICommitmentData[];
     selectedCommitmentId: string | null;
     floorId: string;
-    specialties: ISpecialtyOption[];
-    users: IUserOption[];
+    statuses: IStatusOption[];
     onSelectCommitment: (commitment: ICommitmentData) => void;
     onClose: () => void;
 }
 
-export const CommitmentDetailsSidebar = ({ commitments, selectedCommitmentId, floorId, specialties, users, onSelectCommitment, onClose }: Readonly<ICommitmentDetailsSidebarProps>) => {
+export const CommitmentDetailsSidebar = ({ commitments, selectedCommitmentId, floorId, statuses, onSelectCommitment, onClose }: Readonly<ICommitmentDetailsSidebarProps>) => {
     const router = useRouter();
     const [isPending, startTransition] = useTransition();
     const selectedCommitment = commitments.find(c => c._id === selectedCommitmentId) || null;
+
+    // Helper to get dynamic status style
+    const getStatusStyle = (statusName: string) => {
+        const found = statuses.find(s => s.name === statusName);
+        const color = found?.colorHex || "#94a3b8";
+        return {
+            color,
+            bg: `${color}15`, // ~8% opacity hex
+            label: statusName
+        };
+    };
 
     const handleStatusChange = (commitmentId: string, newStatus: string) => {
         startTransition(async () => {
@@ -91,11 +91,11 @@ export const CommitmentDetailsSidebar = ({ commitments, selectedCommitmentId, fl
                         <div className="flex flex-col items-center justify-center py-12 text-neutral-500 dark:text-neutral-400 text-sm">
                             <span className="material-symbols-outlined text-4xl mb-2 text-neutral-300">task_alt</span>
                             <p className="font-medium">Sin actividades asignadas a este piso</p>
-                            <p className="text-xs mt-1 text-center px-4">Agrega una nueva actividad usando "Drop Pin" en el plano.</p>
+                            <p className="text-xs mt-1 text-center px-4">Agrega una nueva actividad usando &quot;Drop Pin&quot; en el plano.</p>
                         </div>
                     ) : (
                         commitments.map(c => {
-                            const statusStyle = STATUS_COLORS[c.status] || STATUS_COLORS.Request;
+                            const statusStyle = getStatusStyle(c.status);
                             return (
                                 <div
                                     key={c._id}
@@ -118,7 +118,7 @@ export const CommitmentDetailsSidebar = ({ commitments, selectedCommitmentId, fl
                                                 )}
                                             </div>
                                         </div>
-                                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase shrink-0 ${statusStyle.bg} ${statusStyle.text}`}>
+                                        <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase shrink-0" style={{ backgroundColor: statusStyle.bg, color: statusStyle.color }}>
                                             {statusStyle.label}
                                         </span>
                                     </div>
@@ -131,14 +131,14 @@ export const CommitmentDetailsSidebar = ({ commitments, selectedCommitmentId, fl
         );
     }
 
-    const statusStyle = STATUS_COLORS[selectedCommitment.status] || STATUS_COLORS.Request;
+    const statusStyle = getStatusStyle(selectedCommitment.status);
 
     return (
         <aside className="w-80 md:w-96 bg-white dark:bg-neutral-900 border-l border-neutral-200 dark:border-neutral-800 flex flex-col shrink-0 shadow-xl overflow-y-auto z-20">
             <div className="px-6 py-5 border-b border-neutral-200 dark:border-neutral-800 flex justify-between items-start sticky top-0 bg-white/95 dark:bg-neutral-900/95 backdrop-blur z-10">
                 <div>
                     <div className="flex items-center gap-2 mb-1">
-                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${statusStyle.bg} ${statusStyle.text}`}>
+                        <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider" style={{ backgroundColor: statusStyle.bg, color: statusStyle.color }}>
                             {statusStyle.label}
                         </span>
                         <span className="text-xs text-neutral-500">
@@ -223,10 +223,10 @@ export const CommitmentDetailsSidebar = ({ commitments, selectedCommitmentId, fl
                                 <select
                                     value={editForm.status}
                                     onChange={e => setEditForm(prev => ({ ...prev, status: e.target.value }))}
-                                    className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-700 rounded-lg text-sm bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 dark:placeholder-neutral-500"
+                                    className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-700 rounded-lg text-sm bg-white dark:bg-neutral-800 text-neutral-900 dark:text-white placeholder-neutral-400 dark:placeholder-neutral-500"
                                 >
-                                    {Object.keys(STATUS_COLORS).map(status => (
-                                        <option key={status} value={status}>{status}</option>
+                                    {statuses.map(s => (
+                                        <option key={s._id} value={s.name}>{s.name}</option>
                                     ))}
                                 </select>
                             </div>

@@ -3,7 +3,7 @@
 import React, { useState } from "react";
 import { GlobalHeader } from "@/components/organisms/GlobalHeader";
 import { UsersTab } from "./tabs/UsersTab";
-import type { IUserDTO } from "@/types/models";
+import type { IUserDTO, ISpecialtyDTO, IStatusDTO, IRoleDTO } from "@/types/models";
 import type { IBuildingWithFloors } from "@/services/project.service";
 import { BuildingsTab } from "./tabs/BuildingsTab";
 import { ActivitiesTab } from "./tabs/ActivitiesTab";
@@ -15,7 +15,9 @@ interface IManageProjectViewProps {
     activeUsers: IUserDTO[];
     buildings: IBuildingWithFloors[];
     commitments: ISerializedCommitment[];
-    specialties: ISerializedSpecialty[];
+    specialties: ISpecialtyDTO[];
+    statuses: IStatusDTO[];
+    roles: IRoleDTO[];
     currentProjectId: string;
     masterPlanImageUrl: string;
     commitmentCounts: Record<string, number>;
@@ -51,12 +53,6 @@ export interface ISerializedCommitment {
     };
 }
 
-export interface ISerializedSpecialty {
-    _id: string;
-    name: string;
-    colorHex: string;
-}
-
 const TABS: { key: TTab; label: string; icon: string }[] = [
     { key: "users", label: "Users", icon: "group" },
     { key: "buildings", label: "Buildings", icon: "apartment" },
@@ -69,6 +65,8 @@ export function ManageProjectView({
     buildings,
     commitments,
     specialties,
+    statuses,
+    roles,
     currentProjectId,
     masterPlanImageUrl,
     commitmentCounts,
@@ -109,7 +107,7 @@ export function ManageProjectView({
                 </div>
 
                 {/* Tab Content */}
-                <div className="flex-1 overflow-auto p-4 md:p-8">
+                <div className="flex-1 overflow-auto p-4 md:p-8 bg-neutral-50 dark:bg-neutral-900">
                     {activeTab === "users" && (
                         <UsersTab
                             pendingUsers={pendingUsers}
@@ -125,6 +123,7 @@ export function ManageProjectView({
                             commitmentCounts={commitmentCounts}
                             commitments={commitments}
                             specialties={specialties}
+                            statuses={statuses}
                             activeUsers={activeUsers}
                         />
                     )}
@@ -132,6 +131,10 @@ export function ManageProjectView({
                         <ActivitiesTab
                             commitments={commitments}
                             specialties={specialties}
+                            statuses={statuses}
+                            roles={roles}
+                            users={activeUsers}
+                            currentProjectId={currentProjectId}
                         />
                     )}
                 </div>

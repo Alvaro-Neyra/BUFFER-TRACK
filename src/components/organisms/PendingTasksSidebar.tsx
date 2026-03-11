@@ -1,7 +1,6 @@
 "use client";
 
 import React, { useState, useMemo } from "react";
-import { useRouter } from "next/navigation";
 import type { IPendingCommitment } from "@/components/organisms/MasterPlanPage";
 
 interface IPendingTasksSidebarProps {
@@ -10,8 +9,6 @@ interface IPendingTasksSidebarProps {
 }
 
 export const PendingTasksSidebar = ({ commitments, onTaskClick }: IPendingTasksSidebarProps) => {
-    const router = useRouter();
-
     const [filterBuilding, setFilterBuilding] = useState<string>("all");
     const [filterSpecialty, setFilterSpecialty] = useState<string>("all");
 

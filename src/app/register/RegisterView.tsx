@@ -1,40 +1,153 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { GlobalHeader } from "@/components/organisms/GlobalHeader";
+import type { IRoleDTO, ISpecialtyDTO } from "@/types/models";
 
 interface RegisterViewProps {
-    specialties: { id: string; name: string }[];
+    initialSpecialties?: ISpecialtyDTO[];
+    initialRoles?: IRoleDTO[];
 }
 
-export function RegisterView({ specialties }: RegisterViewProps) {
+interface IRegisterOptionsResponse {
+    projectId: string;
+    projectName: string;
+    roles: IRoleDTO[];
+    specialties: ISpecialtyDTO[];
+}
+
+export function RegisterView({ initialSpecialties = [], initialRoles = [] }: RegisterViewProps) {
     const router = useRouter();
     const [isLoading, setIsLoading] = useState(false);
+    const [isLoadingOptions, setIsLoadingOptions] = useState(false);
     const [error, setError] = useState("");
+    const [optionsError, setOptionsError] = useState("");
+    const [projectName, setProjectName] = useState("");
+    const [availableRoles, setAvailableRoles] = useState<IRoleDTO[]>(initialRoles);
+    const [availableSpecialties, setAvailableSpecialties] = useState<ISpecialtyDTO[]>(initialSpecialties);
 
     // Form State
     const [name, setName] = useState("");
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
-    const [role, setRole] = useState("");
+    const [roleId, setRoleId] = useState("");
     const [company, setCompany] = useState("");
     const [projectId, setProjectId] = useState("");
     const [specialtyId, setSpecialtyId] = useState("");
+
+    const selectedRole = useMemo(
+        () => availableRoles.find((role) => role._id === roleId),
+        [availableRoles, roleId]
+    );
+
+    const allowedSpecialties = useMemo(() => {
+        if (!selectedRole) return [];
+        const allowed = new Set(selectedRole.specialtiesIds || []);
+        return availableSpecialties.filter((specialty) => allowed.has(specialty._id));
+    }, [availableSpecialties, selectedRole]);
+
+    const specialtyRequired = Boolean(selectedRole && (selectedRole.specialtiesIds || []).length > 0);
+
+    useEffect(() => {
+        const trimmedCode = projectId.trim();
+        if (!trimmedCode) {
+            setAvailableRoles([]);
+            setAvailableSpecialties([]);
+            setRoleId("");
+            setSpecialtyId("");
+            setProjectName("");
+            setOptionsError("");
+            return;
+        }
+
+        const controller = new AbortController();
+        const timeout = setTimeout(async () => {
+            setIsLoadingOptions(true);
+            setOptionsError("");
+
+            try {
+                const response = await fetch('/api/auth/register/options', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ projectId: trimmedCode }),
+                    signal: controller.signal,
+                });
+
+                const json = await response.json();
+                if (!response.ok) {
+                    setProjectName("");
+                    setAvailableRoles([]);
+                    setAvailableSpecialties([]);
+                    setRoleId("");
+                    setSpecialtyId("");
+                    setOptionsError(json.error || 'Invalid project connection code');
+                    return;
+                }
+
+                const payload: IRegisterOptionsResponse = json.data;
+                setProjectName(payload.projectName);
+                setAvailableRoles(payload.roles);
+                setAvailableSpecialties(payload.specialties);
+                setOptionsError("");
+
+                setRoleId((currentRoleId) => payload.roles.some((role) => role._id === currentRoleId) ? currentRoleId : "");
+                setSpecialtyId((currentSpecialtyId) => payload.specialties.some((specialty) => specialty._id === currentSpecialtyId) ? currentSpecialtyId : "");
+            } catch (fetchError) {
+                if ((fetchError as Error).name === 'AbortError') return;
+                setProjectName("");
+                setAvailableRoles([]);
+                setAvailableSpecialties([]);
+                setRoleId("");
+                setSpecialtyId("");
+                setOptionsError('Unable to load project roles and specialties');
+            } finally {
+                setIsLoadingOptions(false);
+            }
+        }, 350);
+
+        return () => {
+            controller.abort();
+            clearTimeout(timeout);
+        };
+    }, [projectId]);
 
     const handleRegister = async (e: React.FormEvent) => {
         e.preventDefault();
         setIsLoading(true);
         setError("");
 
+        if (optionsError) {
+            setError(optionsError);
+            setIsLoading(false);
+            return;
+        }
+
+        if (!roleId) {
+            setError("Please select a valid role for this project.");
+            setIsLoading(false);
+            return;
+        }
+
+        if (specialtyRequired && !specialtyId) {
+            setError("Please select a specialty for the selected role.");
+            setIsLoading(false);
+            return;
+        }
+
         try {
             const response = await fetch('/api/auth/register', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    name, email, password, role, company, projectId,
-                    ...(role === 'Subcontractor' && specialtyId ? { specialtyId } : {})
+                    name,
+                    email,
+                    password,
+                    roleId,
+                    company,
+                    projectId,
+                    ...(specialtyId ? { specialtyId } : {}),
                 })
             });
 
@@ -125,6 +238,15 @@ export function RegisterView({ specialties }: RegisterViewProps) {
                                     placeholder="e.g. [PROJECT-NAME]-[123...9]"
                                     required
                                 />
+                                {isLoadingOptions && (
+                                    <p className="text-xs mt-2 text-neutral-500 dark:text-neutral-400">Loading project configuration...</p>
+                                )}
+                                {!!optionsError && (
+                                    <p className="text-xs mt-2 text-rose-600">{optionsError}</p>
+                                )}
+                                {!optionsError && !!projectName && !isLoadingOptions && (
+                                    <p className="text-xs mt-2 text-emerald-600">Project detected: {projectName}</p>
+                                )}
                             </div>
 
                             <div>
@@ -144,23 +266,24 @@ export function RegisterView({ specialties }: RegisterViewProps) {
                                 <select
                                     className="w-full px-4 py-3 rounded-lg border border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all appearance-none"
                                     required
-                                    value={role}
-                                    onChange={(e) => setRole(e.target.value)}
+                                    value={roleId}
+                                    onChange={(e) => {
+                                        setRoleId(e.target.value);
+                                        setSpecialtyId("");
+                                    }}
+                                    disabled={isLoadingOptions || availableRoles.length === 0}
                                 >
-                                    <option value="" disabled>Select your role...</option>
-                                    <option value="Subcontractor">Subcontractor</option>
-                                    <option value="Coordinator">Coordinator</option>
-                                    <option value="Production Lead">Production Lead</option>
-                                    <option value="Production Engineer">Production Engineer</option>
-                                    <option value="Production Manager">Production Manager</option>
-                                    <option value="Superintendent">Superintendent</option>
-                                    <option value="Project Manager">Project Manager</option>
-                                    <option value="Project Director">Project Director</option>
+                                    <option value="" disabled>
+                                        {availableRoles.length === 0 ? "Enter a valid project code first..." : "Select your role..."}
+                                    </option>
+                                    {availableRoles.map(role => (
+                                        <option key={role._id} value={role._id}>{role.name}</option>
+                                    ))}
                                 </select>
                             </div>
 
-                            {/* Conditionally reveal Specialty if Role is Subcontractor */}
-                            {role === 'Subcontractor' && (
+                            {/* Specialty required only when the selected role explicitly defines allowed specialties */}
+                            {specialtyRequired && (
                                 <div>
                                     <label className="block text-xs font-bold uppercase tracking-wide text-neutral-600 dark:text-neutral-400 mb-2">Specialty</label>
                                     <select
@@ -170,8 +293,8 @@ export function RegisterView({ specialties }: RegisterViewProps) {
                                         onChange={(e) => setSpecialtyId(e.target.value)}
                                     >
                                         <option value="" disabled>Select your specialty...</option>
-                                        {specialties.map(spec => (
-                                            <option key={spec.id} value={spec.id}>{spec.name}</option>
+                                        {allowedSpecialties.map((specialty) => (
+                                            <option key={specialty._id} value={specialty._id}>{specialty.name}</option>
                                         ))}
                                     </select>
                                 </div>

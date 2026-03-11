@@ -7,7 +7,7 @@ interface ICommitmentPinProps {
     xPercent: number;
     yPercent: number;
     onClick: () => void;
-    status: 'In Progress' | 'Completed' | 'Delayed' | 'Restricted';
+    status: string;
     specialtyColor?: string; // hex color from specialty
     isHighlighted?: boolean; // calendar→plan sync
     icon?: string;

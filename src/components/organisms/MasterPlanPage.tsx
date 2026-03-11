@@ -53,28 +53,11 @@ export function MasterPlanPage({ masterPlanImageUrl, buildings, commitments }: I
             <GlobalHeader showSearch={true} showLinks={true} />
 
             <main className="flex-1 flex overflow-hidden">
-                <aside className="w-16 hover:w-64 bg-white dark:bg-neutral-900 border-r border-neutral-200 dark:border-neutral-800 flex flex-col shrink-0 transition-all duration-300 overflow-hidden group z-20 shadow-md">
-                    <nav className="flex-1 overflow-y-auto py-4 flex flex-col gap-2 px-2">
-                        <a href="/dashboard" className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-neutral-500 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors w-full whitespace-nowrap">
-                            <span className="material-symbols-outlined shrink-0">home</span>
-                            <span className="font-semibold text-sm opacity-0 group-hover:opacity-100 transition-opacity">Dashboard</span>
-                        </a>
-                        <a href="#" className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-primary bg-primary/10 transition-colors w-full whitespace-nowrap border border-primary/20 shadow-sm">
-                            <span className="material-symbols-outlined shrink-0 text-primary">map</span>
-                            <span className="font-semibold text-sm opacity-0 group-hover:opacity-100 transition-opacity">Master Plan</span>
-                        </a>
-                        <a href={`/manage-project`} className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-neutral-500 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors w-full whitespace-nowrap">
-                            <span className="material-symbols-outlined shrink-0">settings</span>
-                            <span className="font-semibold text-sm opacity-0 group-hover:opacity-100 transition-opacity">Manage Project</span>
-                        </a>
-                    </nav>
-                </aside>
-
                 <div className="flex-1 flex flex-col overflow-hidden bg-[#F4F7F6] relative">
                     <ProjectKPIs />
 
                     <div className="flex flex-1 overflow-hidden">
-                        <div className="flex flex-col flex-1 overflow-y-auto p-4 lg:p-6 border-r border-neutral-200 dark:border-neutral-800">
+                        <div className="flex flex-col flex-1 overflow-y-auto p-4 lg:p-6 border-r border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-900">
                             <div className="flex flex-wrap justify-between items-end gap-4 mb-4">
                                 <h1 className="text-neutral-900 dark:text-white text-2xl font-black leading-tight tracking-tight">Master Plan Overview</h1>
                             </div>

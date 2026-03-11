@@ -57,11 +57,18 @@ export interface IUserOption {
     specialtyId: string;
 }
 
+export interface IStatusOption {
+    _id: string;
+    name: string;
+    colorHex: string;
+}
+
 interface IDetailPlanViewProps {
     floorData: IFloorData;
     commitments: ICommitmentData[];
     specialties: ISpecialtyOption[];
     users: IUserOption[];
+    statuses: IStatusOption[];
     currentUserId: string;
 }
 
@@ -72,8 +79,8 @@ export function DetailPlanView({
     commitments,
     specialties,
     users,
+    statuses,
 }: IDetailPlanViewProps) {
-    const [selectedCommitment, setSelectedCommitment] = useState<ICommitmentData | null>(null);
     const [showNewModal, setShowNewModal] = useState(false);
     const [newPinCoords, setNewPinCoords] = useState<{ x: number; y: number } | null>(null);
     const [highlightedPinId, setHighlightedPinId] = useState<string | null>(null);
@@ -92,7 +99,6 @@ export function DetailPlanView({
 
     // Click on pin → open sidebar + highlight calendar day
     const handlePinClick = (commitment: ICommitmentData) => {
-        setSelectedCommitment(commitment);
         setHighlightedPinId(commitment._id);
         setFocusPulse(p => p + 1);
         if (commitment.targetDate) {
@@ -111,19 +117,13 @@ export function DetailPlanView({
         });
         if (match) {
             setHighlightedPinId(match._id);
-            setSelectedCommitment(match);
         }
     };
 
-    // Map pin status to visual status for CommitmentPin
-    const mapPinStatus = (status: string): 'In Progress' | 'Completed' | 'Delayed' | 'Restricted' => {
-        switch (status) {
-            case 'In Progress': return 'In Progress';
-            case 'Completed': return 'Completed';
-            case 'Delayed': return 'Delayed';
-            case 'Restricted': return 'Restricted';
-            default: return 'In Progress'; // Request, Notified, Committed show as in-progress
-        }
+    // Helper to get dynamic status color
+    const getStatusColor = (statusName: string) => {
+        const found = statuses.find(s => s.name === statusName);
+        return found?.colorHex || "#94a3b8"; // Default slate-400
     };
 
     return (
@@ -157,12 +157,12 @@ export function DetailPlanView({
                             imageUrl={floorData.gcsImageUrl}
                             hotspots={commitments.map(c => ({
                                 _id: c._id,
-                                name: c.description || c.specialtyName, // Fallback if no desc
+                                name: c.name || c.description || c.specialtyName,
                                 coordinates: c.coordinates,
-                                color: c.specialtyColor,
+                                color: getStatusColor(c.status),
                                 icon: getSpecialtyIcon(c.specialtyName),
                             }))}
-                            onHotspotSelect={(hotspot: any) => {
+                            onHotspotSelect={(hotspot: { _id: string }) => {
                                 const matched = commitments.find(c => c._id === hotspot._id);
                                 if (matched) {
                                     handlePinClick(matched);
@@ -181,10 +181,8 @@ export function DetailPlanView({
                     commitments={commitments}
                     selectedCommitmentId={highlightedPinId}
                     floorId={floorData._id}
-                    specialties={specialties}
-                    users={users}
+                    statuses={statuses}
                     onSelectCommitment={(commitment) => {
-                        setSelectedCommitment(commitment);
                         setHighlightedPinId(commitment._id);
                         setFocusPulse(p => p + 1);
                         if (commitment.targetDate) {
@@ -192,7 +190,6 @@ export function DetailPlanView({
                         }
                     }}
                     onClose={() => {
-                        setSelectedCommitment(null);
                         setHighlightedPinId(null);
                         setHighlightedDay(null);
                     }}
@@ -208,6 +205,7 @@ export function DetailPlanView({
                         initialY={newPinCoords?.y}
                         specialties={specialties}
                         users={users}
+                        statuses={statuses}
                         projectId={floorData.projectId}
                         buildingId={floorData.buildingId}
                         floorId={floorData._id}
