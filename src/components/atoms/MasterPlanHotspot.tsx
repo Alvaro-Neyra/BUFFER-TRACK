@@ -25,7 +25,7 @@ export const MasterPlanHotspot = ({ xPercent, yPercent, buildingId, color = "bg-
         >
             <div className={cn("absolute inset-0 rounded-full animate-pulse opacity-20 scale-150", color)}></div>
             <div className={cn(
-                "relative w-4 h-4 rounded-full shadow-lg border-2 border-white dark:border-neutral-800 hover:scale-125 transition-transform z-20",
+                "relative w-1 h-1 rounded-full shadow-md border-[0.5px] border-white/80 hover:scale-[3] transition-transform z-20",
                 color
             )}>
             </div>

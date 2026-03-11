@@ -42,7 +42,7 @@ export class BuildingRepository {
     /** Update a building by its ObjectId. */
     static async updateById(id: string, payload: Record<string, unknown>): Promise<IBuilding | null> {
         await this.connect();
-        return Building.findByIdAndUpdate(id, payload, { new: true }).lean() as Promise<IBuilding | null>;
+        return Building.findByIdAndUpdate(id, payload, { returnDocument: 'after' }).lean() as Promise<IBuilding | null>;
     }
 
     /** Delete a single building by its ObjectId. */

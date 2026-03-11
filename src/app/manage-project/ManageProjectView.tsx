@@ -3,7 +3,7 @@
 import React, { useState } from "react";
 import { GlobalHeader } from "@/components/organisms/GlobalHeader";
 import { UsersTab } from "./tabs/UsersTab";
-import type { IUserDTO } from "@/types/models";
+import type { IUserDTO, ISpecialtyDTO, IStatusDTO, IRoleDTO } from "@/types/models";
 import type { IBuildingWithFloors } from "@/services/project.service";
 import { BuildingsTab } from "./tabs/BuildingsTab";
 import { ActivitiesTab } from "./tabs/ActivitiesTab";
@@ -15,7 +15,9 @@ interface IManageProjectViewProps {
     activeUsers: IUserDTO[];
     buildings: IBuildingWithFloors[];
     commitments: ISerializedCommitment[];
-    specialties: ISerializedSpecialty[];
+    specialties: ISpecialtyDTO[];
+    statuses: IStatusDTO[];
+    roles: IRoleDTO[];
     currentProjectId: string;
     masterPlanImageUrl: string;
     commitmentCounts: Record<string, number>;
@@ -25,21 +27,30 @@ export interface ISerializedCommitment {
     _id: string;
     buildingName: string;
     buildingCode: string;
+    floorId: string;
     floorLabel: string;
+    name: string;
+    description: string;
+    specialtyId: string;
     specialtyName: string;
     specialtyColor: string;
+    assignedToId: string;
     assignedToName: string;
     requesterName: string;
     status: string;
+    startDate: string | null;
     targetDate: string | null;
     requestDate: string | null;
     coordinates: { xPercent: number; yPercent: number };
-}
-
-export interface ISerializedSpecialty {
-    _id: string;
-    name: string;
-    colorHex: string;
+    polygon?: { xPercent: number; yPercent: number }[];
+    customId?: string;
+    location?: string;
+    dates?: {
+        requestDate?: string | null;
+        startDate?: string | null;
+        targetDate?: string | null;
+        actualCompletionDate?: string | null;
+    };
 }
 
 const TABS: { key: TTab; label: string; icon: string }[] = [
@@ -54,6 +65,8 @@ export function ManageProjectView({
     buildings,
     commitments,
     specialties,
+    statuses,
+    roles,
     currentProjectId,
     masterPlanImageUrl,
     commitmentCounts,
@@ -86,7 +99,7 @@ export function ManageProjectView({
                                     </span>
                                 )}
                                 {activeTab === tab.key && (
-                                    <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary rounded-t" />
+                                    <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary rounded-t-md" />
                                 )}
                             </button>
                         ))}
@@ -94,7 +107,7 @@ export function ManageProjectView({
                 </div>
 
                 {/* Tab Content */}
-                <div className="flex-1 overflow-auto p-4 md:p-8">
+                <div className="flex-1 overflow-auto p-4 md:p-8 bg-neutral-50 dark:bg-neutral-900">
                     {activeTab === "users" && (
                         <UsersTab
                             pendingUsers={pendingUsers}
@@ -108,12 +121,20 @@ export function ManageProjectView({
                             currentProjectId={currentProjectId}
                             masterPlanImageUrl={masterPlanImageUrl}
                             commitmentCounts={commitmentCounts}
+                            commitments={commitments}
+                            specialties={specialties}
+                            statuses={statuses}
+                            activeUsers={activeUsers}
                         />
                     )}
                     {activeTab === "activities" && (
                         <ActivitiesTab
                             commitments={commitments}
                             specialties={specialties}
+                            statuses={statuses}
+                            roles={roles}
+                            users={activeUsers}
+                            currentProjectId={currentProjectId}
                         />
                     )}
                 </div>

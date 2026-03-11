@@ -3,7 +3,7 @@
 import React, { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { createCommitment } from "@/app/detail/[floorId]/actions";
-import type { ISpecialtyOption, IUserOption } from "@/app/detail/[floorId]/DetailPlanView";
+import type { ISpecialtyOption, IUserOption, IStatusOption } from "@/app/detail/[floorId]/DetailPlanView";
 
 interface INewCommitmentModalProps {
     onClose: () => void;
@@ -11,6 +11,7 @@ interface INewCommitmentModalProps {
     initialY?: number;
     specialties: ISpecialtyOption[];
     users: IUserOption[];
+    statuses: IStatusOption[];
     projectId: string;
     buildingId: string;
     floorId: string;
@@ -22,6 +23,7 @@ export const NewCommitmentModal = ({
     initialY,
     specialties,
     users,
+    statuses,
     projectId,
     buildingId,
     floorId,
@@ -31,6 +33,7 @@ export const NewCommitmentModal = ({
     const [description, setDescription] = useState("");
     const [specialtyId, setSpecialtyId] = useState("");
     const [assignedTo, setAssignedTo] = useState("");
+    const [status, setStatus] = useState(statuses.length > 0 ? statuses[0].name : "Request");
     const [targetDate, setTargetDate] = useState("");
     const [xPercent, setXPercent] = useState(initialX ?? 50);
     const [yPercent, setYPercent] = useState(initialY ?? 50);
@@ -41,7 +44,7 @@ export const NewCommitmentModal = ({
         : users;
 
     const handleSubmit = () => {
-        if (!description || !specialtyId) return;
+        if (!description || !specialtyId || !status) return;
 
         startTransition(async () => {
             const res = await createCommitment({
@@ -51,6 +54,7 @@ export const NewCommitmentModal = ({
                 specialtyId,
                 assignedTo: assignedTo || undefined,
                 description,
+                status,
                 targetDate: targetDate || undefined,
                 coordinates: { xPercent, yPercent },
             });
@@ -125,6 +129,20 @@ export const NewCommitmentModal = ({
                                 <p className="text-xs text-amber-500 mt-1">No users with this specialty found</p>
                             )}
                         </div>
+                    </div>
+
+                    {/* Status Selection */}
+                    <div>
+                        <label className="block text-xs font-bold uppercase tracking-wider text-neutral-600 dark:text-neutral-400 mb-2">Initial Status *</label>
+                        <select
+                            value={status}
+                            onChange={(e) => setStatus(e.target.value)}
+                            className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 rounded-lg text-neutral-900 dark:text-white focus:ring-2 focus:ring-primary focus:border-transparent text-sm"
+                        >
+                            {statuses.map(s => (
+                                <option key={s._id} value={s.name}>{s.name}</option>
+                            ))}
+                        </select>
                     </div>
 
                     {/* Target Date + Coordinates */}

@@ -19,9 +19,31 @@ interface IApiErrorResponse {
 }
 
 export type TApiResponse<T> = IApiSuccessResponse<T> | IApiErrorResponse;
+/**
+ * Sanitize data for Next.js Server Components / Actions by converting
+ * MongoDB ObjectIds to strings and removing Mongoose internals.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function serializeData<T = any>(data: T): T {
+    if (!data) return data;
+    return JSON.parse(JSON.stringify(data));
+}
+
+/**
+ * Return a standardized object for Server Actions.
+ * Ensures the result is a plain object (POJO) to prevent serialization errors.
+ */
+export function actionSuccess<T>(data: T): TApiResponse<T> {
+    return { success: true, data: serializeData(data) };
+}
+
+export function actionError(error: string): IApiErrorResponse {
+    return { success: false, error };
+}
 
 /**
  * Return a successful JSON response.
+...
  * @param data - The payload to return under the `data` key.
  * @param status - HTTP status code (default 200).
  */

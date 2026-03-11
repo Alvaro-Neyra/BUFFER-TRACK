@@ -7,7 +7,7 @@ interface ICommitmentPinProps {
     xPercent: number;
     yPercent: number;
     onClick: () => void;
-    status: 'In Progress' | 'Completed' | 'Delayed' | 'Restricted';
+    status: string;
     specialtyColor?: string; // hex color from specialty
     isHighlighted?: boolean; // calendar→plan sync
     icon?: string;
@@ -51,6 +51,7 @@ export const CommitmentPin = ({
     return (
         <button
             onClick={(e) => { e.stopPropagation(); onClick(); }}
+            data-plan-pin="true"
             className={cn(
                 "absolute size-10 rounded-full shadow-xl flex items-center justify-center text-white border-2 border-white dark:border-neutral-900 z-10 transition-all",
                 isHighlighted ? "scale-150 ring-4 ring-primary/50" : "scale-110 ring-4 hover:scale-125",

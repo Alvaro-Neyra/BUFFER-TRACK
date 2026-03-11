@@ -3,10 +3,10 @@
 import React, { useState } from "react";
 import { GlobalHeader } from "@/components/organisms/GlobalHeader";
 import { CalendarBar } from "@/components/organisms/CalendarBar";
-import { PlanViewer } from "@/components/organisms/PlanViewer";
+import { InteractivePlanViewer } from "@/components/organisms/InteractivePlanViewer";
 import { CommitmentDetailsSidebar } from "@/components/organisms/CommitmentDetailsSidebar";
 import { NewCommitmentModal } from "@/components/organisms/NewCommitmentModal";
-import { CommitmentPin } from "@/components/atoms/CommitmentPin";
+import { getSpecialtyIcon } from "@/lib/getSpecialtyIcon";
 
 // ─── Types ───────────────────────────────────────────────────────
 
@@ -23,14 +23,21 @@ export interface IFloorData {
 
 export interface ICommitmentData {
     _id: string;
+    customId?: string;
+    location?: string;
+    name: string;
     description: string;
     status: string;
     specialtyName: string;
     specialtyColor: string;
+    specialtyId: string;
+    assignedToId: string;
     assignedToName: string;
     assignedToCompany: string;
+    requesterId: string;
     requesterName: string;
     coordinates: { xPercent: number; yPercent: number };
+    startDate: string | null;
     targetDate: string | null;
     requestDate: string | null;
     weekStart: string | null;
@@ -50,12 +57,18 @@ export interface IUserOption {
     specialtyId: string;
 }
 
+export interface IStatusOption {
+    _id: string;
+    name: string;
+    colorHex: string;
+}
+
 interface IDetailPlanViewProps {
     floorData: IFloorData;
     commitments: ICommitmentData[];
     specialties: ISpecialtyOption[];
     users: IUserOption[];
-    weekStart: string;
+    statuses: IStatusOption[];
     currentUserId: string;
 }
 
@@ -66,25 +79,28 @@ export function DetailPlanView({
     commitments,
     specialties,
     users,
-    weekStart,
-    currentUserId,
+    statuses,
 }: IDetailPlanViewProps) {
-    const [selectedCommitment, setSelectedCommitment] = useState<ICommitmentData | null>(null);
     const [showNewModal, setShowNewModal] = useState(false);
     const [newPinCoords, setNewPinCoords] = useState<{ x: number; y: number } | null>(null);
     const [highlightedPinId, setHighlightedPinId] = useState<string | null>(null);
     const [highlightedDay, setHighlightedDay] = useState<string | null>(null);
+    const [mapMode, setMapMode] = useState<"view" | "placing">("view");
+    const [focusPulse, setFocusPulse] = useState(0);
 
-    // Click on plan → open commitment creation modal
+    // Click on plan → open commitment creation modal (only if in placing mode)
     const handleMapClick = (xPercent: number, yPercent: number) => {
-        setNewPinCoords({ x: xPercent, y: yPercent });
-        setShowNewModal(true);
+        if (mapMode === "placing") {
+            setNewPinCoords({ x: xPercent, y: yPercent });
+            setShowNewModal(true);
+            setMapMode("view"); // Reset to view mode after dropping a pin
+        }
     };
 
     // Click on pin → open sidebar + highlight calendar day
     const handlePinClick = (commitment: ICommitmentData) => {
-        setSelectedCommitment(commitment);
         setHighlightedPinId(commitment._id);
+        setFocusPulse(p => p + 1);
         if (commitment.targetDate) {
             setHighlightedDay(commitment.targetDate);
         }
@@ -101,33 +117,27 @@ export function DetailPlanView({
         });
         if (match) {
             setHighlightedPinId(match._id);
-            setSelectedCommitment(match);
         }
     };
 
-    // Map pin status to visual status for CommitmentPin
-    const mapPinStatus = (status: string): 'In Progress' | 'Completed' | 'Delayed' | 'Restricted' => {
-        switch (status) {
-            case 'In Progress': return 'In Progress';
-            case 'Completed': return 'Completed';
-            case 'Delayed': return 'Delayed';
-            case 'Restricted': return 'Restricted';
-            default: return 'In Progress'; // Request, Notified, Committed show as in-progress
-        }
+    // Helper to get dynamic status color
+    const getStatusColor = (statusName: string) => {
+        const found = statuses.find(s => s.name === statusName);
+        return found?.colorHex || "#94a3b8"; // Default slate-400
     };
 
     return (
         <div className="flex flex-col h-full w-full overflow-hidden bg-[#F4F7F6] dark:bg-neutral-950">
-            <GlobalHeader title={`${floorData.buildingName} · ${floorData.label}`} />
+            <GlobalHeader title={`${floorData.buildingName} · ${floorData.label}`} showLinks={true} />
 
             <main className="flex-1 flex overflow-hidden">
                 <div className="flex-1 flex flex-col overflow-hidden relative">
                     {/* Calendar Bar */}
                     <CalendarBar
                         commitments={commitments}
-                        weekStart={weekStart}
                         highlightedDay={highlightedDay}
                         onDayClick={handleDayClick}
+                        onCommitmentClick={handlePinClick}
                     />
 
                     {/* Plan Area */}
@@ -141,61 +151,67 @@ export function DetailPlanView({
                                     {commitments.length} commitment{commitments.length !== 1 ? "s" : ""} on this floor
                                 </p>
                             </div>
-                            <button
-                                onClick={() => { setNewPinCoords(null); setShowNewModal(true); }}
-                                className="px-4 py-2 bg-primary hover:bg-primary/90 text-white rounded-lg text-sm font-bold transition-colors shadow-sm flex items-center gap-2"
-                            >
-                                <span className="material-symbols-outlined text-sm">add_location_alt</span>
-                                Drop Pin
-                            </button>
                         </div>
 
-                        <PlanViewer
+                        <InteractivePlanViewer
                             imageUrl={floorData.gcsImageUrl}
+                            hotspots={commitments.map(c => ({
+                                _id: c._id,
+                                name: c.name || c.description || c.specialtyName,
+                                coordinates: c.coordinates,
+                                color: getStatusColor(c.status),
+                                icon: getSpecialtyIcon(c.specialtyName),
+                            }))}
+                            onHotspotSelect={(hotspot: { _id: string }) => {
+                                const matched = commitments.find(c => c._id === hotspot._id);
+                                if (matched) {
+                                    handlePinClick(matched);
+                                }
+                            }}
+                            selectedHotspotId={highlightedPinId}
+                            focusPulse={focusPulse}
                             onMapClick={handleMapClick}
-                        >
-                            {commitments.map(c => (
-                                <CommitmentPin
-                                    key={c._id}
-                                    xPercent={c.coordinates.xPercent}
-                                    yPercent={c.coordinates.yPercent}
-                                    status={mapPinStatus(c.status)}
-                                    specialtyColor={c.specialtyColor}
-                                    isHighlighted={highlightedPinId === c._id}
-                                    onClick={() => handlePinClick(c)}
-                                />
-                            ))}
-                        </PlanViewer>
+                            mode={mapMode}
+                        />
                     </div>
                 </div>
 
-                {/* Commitment Details Sidebar */}
-                {selectedCommitment && (
-                    <CommitmentDetailsSidebar
-                        commitment={selectedCommitment}
-                        floorId={floorData._id}
-                        onClose={() => {
-                            setSelectedCommitment(null);
-                            setHighlightedPinId(null);
-                            setHighlightedDay(null);
-                        }}
-                    />
-                )}
-            </main>
+                {/* Commitment Details Sidebar - Always Open */}
+                <CommitmentDetailsSidebar
+                    commitments={commitments}
+                    selectedCommitmentId={highlightedPinId}
+                    floorId={floorData._id}
+                    statuses={statuses}
+                    onSelectCommitment={(commitment) => {
+                        setHighlightedPinId(commitment._id);
+                        setFocusPulse(p => p + 1);
+                        if (commitment.targetDate) {
+                            setHighlightedDay(commitment.targetDate);
+                        }
+                    }}
+                    onClose={() => {
+                        setHighlightedPinId(null);
+                        setHighlightedDay(null);
+                    }}
+                />
+            </main >
 
             {/* New Commitment Modal */}
-            {showNewModal && (
-                <NewCommitmentModal
-                    onClose={() => { setShowNewModal(false); setNewPinCoords(null); }}
-                    initialX={newPinCoords?.x}
-                    initialY={newPinCoords?.y}
-                    specialties={specialties}
-                    users={users}
-                    projectId={floorData.projectId}
-                    buildingId={floorData.buildingId}
-                    floorId={floorData._id}
-                />
-            )}
-        </div>
+            {
+                showNewModal && (
+                    <NewCommitmentModal
+                        onClose={() => { setShowNewModal(false); setNewPinCoords(null); setMapMode("view"); }}
+                        initialX={newPinCoords?.x}
+                        initialY={newPinCoords?.y}
+                        specialties={specialties}
+                        users={users}
+                        statuses={statuses}
+                        projectId={floorData.projectId}
+                        buildingId={floorData.buildingId}
+                        floorId={floorData._id}
+                    />
+                )
+            }
+        </div >
     );
 }

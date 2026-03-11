@@ -4,24 +4,33 @@ import { auth } from "@/lib/auth";
 import connectToDatabase from "@/lib/mongodb";
 import { CommitmentRepository } from "@/repositories/commitment.repository";
 import { RestrictionRepository } from "@/repositories/restriction.repository";
+import { roleRepository } from "@/repositories/role.repository";
 import mongoose from "mongoose";
 
 export async function getProjectCommitments(projectId: string) {
     const session = await auth();
     if (!session?.user) throw new Error("Unauthorized");
 
+    const membership = session.user.projects?.find(
+        (project) => project.projectId === projectId && project.status === "Active"
+    );
+    if (!membership) throw new Error("Unauthorized");
+
     await connectToDatabase();
+
+    const membershipRole = membership.roleId
+        ? await roleRepository.getByIdInProject(membership.roleId, projectId)
+        : null;
+    const isManager = Boolean(membershipRole?.isManager);
+    const userSpecialtyId = membership.specialtyId;
 
     // 1. Fetch commitments with populated references
     const rawCommitments = await CommitmentRepository.findByProjectPopulated(projectId);
 
-    // Filter based on role (Workers only see their own specialty)
-    const isManager = ['Admin', 'Project Director', 'Project Manager', 'Superintendent', 'Production Manager', 'Production Engineer', 'Production Lead'].includes(session.user.role);
-
     let commitments = rawCommitments;
-    if (!isManager && session.user.specialtyId) {
+    if (!isManager && userSpecialtyId) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        commitments = rawCommitments.filter((c: any) => c.specialtyId?._id?.toString() === session.user.specialtyId);
+        commitments = rawCommitments.filter((c: any) => c.specialtyId?._id?.toString() === userSpecialtyId);
     }
 
     // Process commitments to plain JS

@@ -24,6 +24,8 @@ interface ISerializedBuilding {
     code: string;
     number: number;
     coordinates: { xPercent: number; yPercent: number };
+    polygon?: Array<{ xPercent: number; yPercent: number }>;
+    color?: string;
     floors: Array<{ _id: string; label: string; order: number }>;
 }
 
@@ -34,12 +36,57 @@ export interface IBuildingWithFloors {
     code: string;
     number: number;
     coordinates: { xPercent: number; yPercent: number };
+    polygon?: Array<{ xPercent: number; yPercent: number }>;
+    color?: string;
     floors: Array<{
         _id: string;
         label: string;
         order: number;
         gcsImageUrl: string;
     }>;
+}
+
+function serializeBuildingForMasterPlan(b: Record<string, unknown>): ISerializedBuilding {
+    return {
+        _id: String(b._id),
+        projectId: String(b.projectId),
+        name: String(b.name),
+        code: String(b.code),
+        number: Number(b.number),
+        coordinates: {
+            xPercent: Number(b.coordinates && (b.coordinates as Record<string, unknown>).xPercent),
+            yPercent: Number(b.coordinates && (b.coordinates as Record<string, unknown>).yPercent),
+        },
+        polygon: Array.isArray(b.polygon) && b.polygon.length >= 3
+            ? b.polygon.map((p: unknown) => ({
+                xPercent: Number((p as Record<string, unknown>).xPercent),
+                yPercent: Number((p as Record<string, unknown>).yPercent),
+            }))
+            : undefined,
+        color: b.color ? String(b.color) : undefined,
+        floors: [],
+    };
+}
+
+function serializeBuildingWithFloors(b: Record<string, unknown>): IBuildingWithFloors {
+    return {
+        _id: String(b._id),
+        name: String(b.name),
+        code: String(b.code),
+        number: Number(b.number),
+        coordinates: {
+            xPercent: Number(b.coordinates && (b.coordinates as Record<string, unknown>).xPercent),
+            yPercent: Number(b.coordinates && (b.coordinates as Record<string, unknown>).yPercent),
+        },
+        polygon: Array.isArray(b.polygon) && b.polygon.length >= 3
+            ? b.polygon.map((p: unknown) => ({
+                xPercent: Number((p as Record<string, unknown>).xPercent),
+                yPercent: Number((p as Record<string, unknown>).yPercent),
+            }))
+            : undefined,
+        color: b.color ? String(b.color) : undefined,
+        floors: [],
+    };
 }
 
 export class ProjectService {
@@ -52,8 +99,8 @@ export class ProjectService {
         const projects = await ProjectRepository.findByIds(activeProjectIds);
 
         return projects.map((p) => ({
-            id: p._id.toString(),
-            name: p.name,
+            id: String(p._id),
+            name: String(p.name),
         }));
     }
 
@@ -65,24 +112,19 @@ export class ProjectService {
 
         const result: ISerializedBuilding[] = [];
         for (const b of buildings) {
-            const floors = await FloorRepository.findByBuildingId(b._id.toString());
-            result.push({
-                _id: b._id.toString(),
-                projectId: b.projectId.toString(),
-                name: b.name,
-                code: b.code,
-                number: b.number,
-                coordinates: b.coordinates,
-                floors: floors.map(f => ({
-                    _id: f._id.toString(),
-                    label: f.label,
-                    order: f.order,
-                })),
-            });
+            const serialized = serializeBuildingForMasterPlan(b as unknown as Record<string, unknown>);
+            const floors = await FloorRepository.findByBuildingId(serialized._id);
+            serialized.floors = floors.map(f => ({
+                _id: String(f._id),
+                label: String(f.label),
+                order: Number(f.order),
+            }));
+            result.push(serialized);
         }
 
         return result;
     }
+
 
     /**
      * Get buildings with their nested floors for the admin panel.
@@ -92,20 +134,15 @@ export class ProjectService {
 
         const result: IBuildingWithFloors[] = [];
         for (const building of buildings) {
-            const floors = await FloorRepository.findByBuildingId(building._id.toString());
-            result.push({
-                _id: building._id.toString(),
-                name: building.name,
-                code: building.code,
-                number: building.number,
-                coordinates: building.coordinates,
-                floors: floors.map((f) => ({
-                    _id: f._id.toString(),
-                    label: f.label,
-                    order: f.order,
-                    gcsImageUrl: f.gcsImageUrl,
-                })),
-            });
+            const serialized = serializeBuildingWithFloors(building as unknown as Record<string, unknown>);
+            const floors = await FloorRepository.findByBuildingId(serialized._id);
+            serialized.floors = floors.map(f => ({
+                _id: String(f._id),
+                label: String(f.label),
+                order: Number(f.order),
+                gcsImageUrl: String(f.gcsImageUrl),
+            }));
+            result.push(serialized);
         }
 
         return result;
@@ -116,21 +153,21 @@ export class ProjectService {
      */
     static async createBuilding(
         projectId: string,
-        data: { name: string; code: string; number: number; coordinates: { xPercent: number; yPercent: number } }
+        data: {
+            name: string;
+            code: string;
+            number: number;
+            coordinates: { xPercent: number; yPercent: number };
+            polygon?: Array<{ xPercent: number; yPercent: number }>;
+            color?: string;
+        }
     ): Promise<IBuildingWithFloors> {
         const building = await BuildingRepository.create({
             projectId: new mongoose.Types.ObjectId(projectId),
             ...data,
         });
 
-        return {
-            _id: building._id.toString(),
-            name: building.name,
-            code: building.code,
-            number: building.number,
-            coordinates: building.coordinates,
-            floors: [],
-        };
+        return serializeBuildingWithFloors(building as unknown as Record<string, unknown>);
     }
 
     /**
@@ -138,7 +175,7 @@ export class ProjectService {
      */
     static async updateBuilding(
         buildingId: string,
-        data: { name?: string; code?: string; number?: number; coordinates?: { xPercent: number; yPercent: number } }
+        data: { name?: string; code?: string; number?: number; color?: string; coordinates?: { xPercent: number; yPercent: number } }
     ): Promise<void> {
         await BuildingRepository.updateById(buildingId, data);
     }

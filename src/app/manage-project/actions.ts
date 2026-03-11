@@ -2,18 +2,136 @@
 
 import { auth } from "@/lib/auth";
 import connectToDatabase from "@/lib/mongodb";
-import { isManagerRole } from "@/constants/roles";
 import { UserAdminService } from "@/services/userAdmin.service";
 import { ProjectService } from "@/services/project.service";
 import { ProjectRepository } from "@/repositories/project.repository";
+import { BuildingRepository } from "@/repositories/building.repository";
+import { FloorRepository } from "@/repositories/floor.repository";
+import { SpecialtyRepository } from "@/repositories/specialty.repository";
+import { statusRepository } from "@/repositories/status.repository";
+import { roleRepository } from "@/repositories/role.repository";
+import { CommitmentRepository } from "@/repositories/commitment.repository";
+import { UserRepository } from "@/repositories/user.repository";
 import { revalidatePath } from "next/cache";
+import { actionSuccess, actionError } from "@/lib/apiResponse";
+import mongoose from "mongoose";
+
+type TAccessResult =
+    | { ok: true; userId: string }
+    | { ok: false; message: string };
+
+type TProjectContextResult =
+    | { projectId: string }
+    | { error: string };
+
+function asObjectIdString(value: unknown): string | null {
+    if (typeof value !== "string" || !mongoose.isValidObjectId(value)) {
+        return null;
+    }
+    return value;
+}
+
+async function resolveProjectIdFromBuildingId(buildingId: string): Promise<string | null> {
+    const building = await BuildingRepository.findById(buildingId);
+    return building?.projectId?.toString() || null;
+}
+
+async function resolveProjectIdFromFloorId(floorId: string): Promise<string | null> {
+    const floor = await FloorRepository.findById(floorId);
+    if (!floor) return null;
+    return resolveProjectIdFromBuildingId(floor.buildingId.toString());
+}
+
+async function resolveProjectIdFromCommitmentId(commitmentId: string): Promise<string | null> {
+    const commitment = await CommitmentRepository.findById(commitmentId);
+    return commitment?.projectId?.toString() || null;
+}
+
+async function resolveCommitmentProjectContext(payload: Record<string, unknown>): Promise<TProjectContextResult> {
+    const payloadProjectId = asObjectIdString(payload.projectId);
+    const buildingId = asObjectIdString(payload.buildingId);
+    const floorId = asObjectIdString(payload.floorId);
+
+    const [projectIdFromBuilding, projectIdFromFloor] = await Promise.all([
+        buildingId ? resolveProjectIdFromBuildingId(buildingId) : Promise.resolve(null),
+        floorId ? resolveProjectIdFromFloorId(floorId) : Promise.resolve(null),
+    ]);
+
+    const candidates = [payloadProjectId, projectIdFromBuilding, projectIdFromFloor].filter(
+        (candidate): candidate is string => Boolean(candidate)
+    );
+
+    if (candidates.length === 0) {
+        return { error: "Invalid project context" };
+    }
+
+    const canonicalProjectId = candidates[0];
+    const hasMismatch = candidates.some((candidate) => candidate !== canonicalProjectId);
+    if (hasMismatch) {
+        return { error: "Invalid project context" };
+    }
+
+    return { projectId: canonicalProjectId };
+}
+
+async function requireProjectManagerAccess(projectId: string): Promise<TAccessResult> {
+    if (!mongoose.isValidObjectId(projectId)) {
+        return { ok: false, message: "Invalid project id" };
+    }
+
+    const session = await auth();
+    if (!session?.user) {
+        return { ok: false, message: "Unauthorized" };
+    }
+
+    const dbUser = await UserRepository.findById(session.user.id);
+    if (!dbUser) {
+        return { ok: false, message: "Unauthorized" };
+    }
+
+    const membership = dbUser.projects?.find(
+        (project) => project.projectId.toString() === projectId && project.status === "Active"
+    );
+
+    if (!membership) {
+        return { ok: false, message: "Unauthorized" };
+    }
+
+    // Global Admin keeps full access as long as membership in the project is active.
+    if (session.user.role.toLowerCase() === "admin") {
+        return { ok: true, userId: session.user.id };
+    }
+
+    let membershipRoleId = membership.roleId?.toString();
+
+    if (!membershipRoleId) {
+        const roleByLegacyName = await roleRepository.findByNameInProject(session.user.role, projectId);
+        if (roleByLegacyName?._id) {
+            membershipRoleId = roleByLegacyName._id.toString();
+            await UserRepository.updateProjectMembership(session.user.id, projectId, {
+                roleId: membershipRoleId,
+            });
+        }
+    }
+
+    if (!membershipRoleId) {
+        return { ok: false, message: "Unauthorized" };
+    }
+
+    const membershipRole = await roleRepository.getByIdInProject(membershipRoleId, projectId);
+    if (membershipRole?.isManager) {
+        return { ok: true, userId: session.user.id };
+    }
+
+    return { ok: false, message: "Unauthorized" };
+}
 
 // ─── Project Settings Actions ─────────────────────────────────────
 
 export async function updateMasterPlanImage(projectId: string, imageUrl: string) {
-    const session = await auth();
-    if (!session?.user || !isManagerRole(session.user.role)) {
-        return { success: false, error: "Unauthorized" };
+    const access = await requireProjectManagerAccess(projectId);
+    if (!access.ok) {
+        return actionError(access.message);
     }
 
     await connectToDatabase();
@@ -22,10 +140,10 @@ export async function updateMasterPlanImage(projectId: string, imageUrl: string)
         await ProjectRepository.updateById(projectId, { masterPlanImageUrl: imageUrl });
         revalidatePath('/manage-project');
         revalidatePath('/');
-        return { success: true };
+        return actionSuccess(true);
     } catch (error) {
         console.error("Failed to update master plan image:", error);
-        return { success: false, error: "Failed to update image" };
+        return actionError("Failed to update image");
     }
 }
 
@@ -34,10 +152,9 @@ export async function handleUserProjectAccess(
     projectId: string,
     action: 'accept' | 'reject' | 'remove'
 ) {
-    const session = await auth();
-    if (!session?.user) throw new Error("Unauthorized");
-    if (!isManagerRole(session.user.role)) {
-        throw new Error("Forbidden: You do not have permission to manage users");
+    const access = await requireProjectManagerAccess(projectId);
+    if (!access.ok) {
+        return actionError(access.message);
     }
 
     await connectToDatabase();
@@ -45,10 +162,10 @@ export async function handleUserProjectAccess(
     try {
         await UserAdminService.handleAccess(userId, projectId, action);
         revalidatePath('/manage-project');
-        return { success: true };
+        return actionSuccess(true);
     } catch (error) {
         console.error(`Failed to ${action} user ${userId}:`, error);
-        return { success: false, error: "Database operation failed" };
+        return actionError("Database operation failed");
     }
 }
 
@@ -56,11 +173,18 @@ export async function handleUserProjectAccess(
 
 export async function createBuilding(
     projectId: string,
-    data: { name: string; code: string; number: number; coordinates: { xPercent: number; yPercent: number } }
+    data: {
+        name: string;
+        code: string;
+        number: number;
+        coordinates: { xPercent: number; yPercent: number };
+        polygon?: Array<{ xPercent: number; yPercent: number }>;
+        color?: string;
+    }
 ) {
-    const session = await auth();
-    if (!session?.user || !isManagerRole(session.user.role)) {
-        return { success: false, error: "Unauthorized" };
+    const access = await requireProjectManagerAccess(projectId);
+    if (!access.ok) {
+        return actionError(access.message);
     }
 
     await connectToDatabase();
@@ -68,20 +192,29 @@ export async function createBuilding(
     try {
         const building = await ProjectService.createBuilding(projectId, data);
         revalidatePath('/manage-project');
-        return { success: true, data: building };
+        return actionSuccess(building);
     } catch (error) {
         console.error("Failed to create building:", error);
-        return { success: false, error: "Failed to create building" };
+        return actionError("Failed to create building");
     }
 }
 
 export async function updateBuilding(
     buildingId: string,
-    data: { name?: string; code?: string; number?: number; coordinates?: { xPercent: number; yPercent: number } }
+    data: { name?: string; code?: string; number?: number; color?: string; coordinates?: { xPercent: number; yPercent: number } }
 ) {
-    const session = await auth();
-    if (!session?.user || !isManagerRole(session.user.role)) {
-        return { success: false, error: "Unauthorized" };
+    if (!mongoose.isValidObjectId(buildingId)) {
+        return actionError("Invalid building id");
+    }
+
+    const projectId = await resolveProjectIdFromBuildingId(buildingId);
+    if (!projectId) {
+        return actionError("Building not found");
+    }
+
+    const access = await requireProjectManagerAccess(projectId);
+    if (!access.ok) {
+        return actionError(access.message);
     }
 
     await connectToDatabase();
@@ -89,17 +222,26 @@ export async function updateBuilding(
     try {
         await ProjectService.updateBuilding(buildingId, data);
         revalidatePath('/manage-project');
-        return { success: true };
+        return actionSuccess(true);
     } catch (error) {
         console.error("Failed to update building:", error);
-        return { success: false, error: "Failed to update building" };
+        return actionError("Failed to update building");
     }
 }
 
 export async function deleteBuilding(buildingId: string) {
-    const session = await auth();
-    if (!session?.user || !isManagerRole(session.user.role)) {
-        return { success: false, error: "Unauthorized" };
+    if (!mongoose.isValidObjectId(buildingId)) {
+        return actionError("Invalid building id");
+    }
+
+    const projectId = await resolveProjectIdFromBuildingId(buildingId);
+    if (!projectId) {
+        return actionError("Building not found");
+    }
+
+    const access = await requireProjectManagerAccess(projectId);
+    if (!access.ok) {
+        return actionError(access.message);
     }
 
     await connectToDatabase();
@@ -107,10 +249,10 @@ export async function deleteBuilding(buildingId: string) {
     try {
         await ProjectService.deleteBuilding(buildingId);
         revalidatePath('/manage-project');
-        return { success: true };
+        return actionSuccess(true);
     } catch (error) {
         console.error("Failed to delete building:", error);
-        return { success: false, error: "Failed to delete building" };
+        return actionError("Failed to delete building");
     }
 }
 
@@ -120,9 +262,18 @@ export async function createFloor(
     buildingId: string,
     data: { label: string; order: number; gcsImageUrl: string }
 ) {
-    const session = await auth();
-    if (!session?.user || !isManagerRole(session.user.role)) {
-        return { success: false, error: "Unauthorized" };
+    if (!mongoose.isValidObjectId(buildingId)) {
+        return actionError("Invalid building id");
+    }
+
+    const projectId = await resolveProjectIdFromBuildingId(buildingId);
+    if (!projectId) {
+        return actionError("Building not found");
+    }
+
+    const access = await requireProjectManagerAccess(projectId);
+    if (!access.ok) {
+        return actionError(access.message);
     }
 
     await connectToDatabase();
@@ -130,10 +281,10 @@ export async function createFloor(
     try {
         const floor = await ProjectService.createFloor(buildingId, data);
         revalidatePath('/manage-project');
-        return { success: true, data: floor };
+        return actionSuccess(floor);
     } catch (error) {
         console.error("Failed to create floor:", error);
-        return { success: false, error: "Failed to create floor" };
+        return actionError("Failed to create floor");
     }
 }
 
@@ -141,9 +292,18 @@ export async function updateFloor(
     floorId: string,
     data: { label?: string; order?: number; gcsImageUrl?: string }
 ) {
-    const session = await auth();
-    if (!session?.user || !isManagerRole(session.user.role)) {
-        return { success: false, error: "Unauthorized" };
+    if (!mongoose.isValidObjectId(floorId)) {
+        return actionError("Invalid floor id");
+    }
+
+    const projectId = await resolveProjectIdFromFloorId(floorId);
+    if (!projectId) {
+        return actionError("Floor not found");
+    }
+
+    const access = await requireProjectManagerAccess(projectId);
+    if (!access.ok) {
+        return actionError(access.message);
     }
 
     await connectToDatabase();
@@ -151,17 +311,26 @@ export async function updateFloor(
     try {
         await ProjectService.updateFloor(floorId, data);
         revalidatePath('/manage-project');
-        return { success: true };
+        return actionSuccess(true);
     } catch (error) {
         console.error("Failed to update floor:", error);
-        return { success: false, error: "Failed to update floor" };
+        return actionError("Failed to update floor");
     }
 }
 
 export async function deleteFloor(floorId: string) {
-    const session = await auth();
-    if (!session?.user || !isManagerRole(session.user.role)) {
-        return { success: false, error: "Unauthorized" };
+    if (!mongoose.isValidObjectId(floorId)) {
+        return actionError("Invalid floor id");
+    }
+
+    const projectId = await resolveProjectIdFromFloorId(floorId);
+    if (!projectId) {
+        return actionError("Floor not found");
+    }
+
+    const access = await requireProjectManagerAccess(projectId);
+    if (!access.ok) {
+        return actionError(access.message);
     }
 
     await connectToDatabase();
@@ -169,9 +338,422 @@ export async function deleteFloor(floorId: string) {
     try {
         await ProjectService.deleteFloor(floorId);
         revalidatePath('/manage-project');
-        return { success: true };
+        return actionSuccess(true);
     } catch (error) {
         console.error("Failed to delete floor:", error);
-        return { success: false, error: "Failed to delete floor" };
+        return actionError("Failed to delete floor");
     }
 }
+
+// ─── Commitment (Activity) Management Actions ─────────────────────
+
+export async function createCommitment(data: Record<string, unknown>) {
+    const context = await resolveCommitmentProjectContext(data);
+    if ("error" in context) {
+        return actionError(context.error);
+    }
+
+    const access = await requireProjectManagerAccess(context.projectId);
+    if (!access.ok) {
+        return actionError(access.message);
+    }
+
+    await connectToDatabase();
+
+    try {
+        const commitment = await CommitmentRepository.create({
+            ...data,
+            projectId: context.projectId,
+            requesterId: access.userId,
+        });
+        revalidatePath('/manage-project');
+        return actionSuccess(commitment);
+    } catch (error) {
+        console.error("Failed to create commitment:", error);
+        return actionError("Failed to create activity");
+    }
+}
+
+export async function updateCommitment(commitmentId: string, data: Record<string, unknown>) {
+    if (!mongoose.isValidObjectId(commitmentId)) {
+        return actionError("Invalid activity id");
+    }
+
+    const projectId = await resolveProjectIdFromCommitmentId(commitmentId);
+    if (!projectId) {
+        return actionError("Activity not found");
+    }
+
+    const access = await requireProjectManagerAccess(projectId);
+    if (!access.ok) {
+        return actionError(access.message);
+    }
+
+    await connectToDatabase();
+
+    try {
+        const commitment = await CommitmentRepository.update(commitmentId, data);
+        revalidatePath('/manage-project');
+        return actionSuccess(commitment);
+    } catch (error) {
+        console.error("Failed to update commitment:", error);
+        return actionError("Failed to update activity");
+    }
+}
+
+export async function deleteCommitment(commitmentId: string) {
+    if (!mongoose.isValidObjectId(commitmentId)) {
+        return actionError("Invalid activity id");
+    }
+
+    const projectId = await resolveProjectIdFromCommitmentId(commitmentId);
+    if (!projectId) {
+        return actionError("Activity not found");
+    }
+
+    const access = await requireProjectManagerAccess(projectId);
+    if (!access.ok) {
+        return actionError(access.message);
+    }
+
+    await connectToDatabase();
+
+    try {
+        await CommitmentRepository.delete(commitmentId);
+        revalidatePath('/manage-project');
+        return actionSuccess(true);
+    } catch (error) {
+        console.error("Failed to delete commitment:", error);
+        return actionError("Failed to delete activity");
+    }
+}
+
+// ─── Specialty Management Actions ────────────────────────────────
+
+export async function createSpecialty(data: { projectId: string; name: string; colorHex: string }) {
+    if (!mongoose.isValidObjectId(data.projectId)) {
+        return actionError("Invalid project id");
+    }
+
+    const access = await requireProjectManagerAccess(data.projectId);
+    if (!access.ok) {
+        return actionError(access.message);
+    }
+
+    await connectToDatabase();
+
+    try {
+        const existing = await SpecialtyRepository.findByNameInProject(data.name, data.projectId);
+        if (existing) {
+            return actionError("A specialty with this name already exists in this project");
+        }
+
+        const specialty = await SpecialtyRepository.create({
+            projectId: new mongoose.Types.ObjectId(data.projectId),
+            name: data.name,
+            colorHex: data.colorHex,
+        });
+        revalidatePath('/manage-project');
+        return actionSuccess(specialty);
+    } catch (error) {
+        console.error("Failed to create specialty:", error);
+        return actionError("Failed to create specialty");
+    }
+}
+
+export async function updateSpecialty(id: string, data: { projectId: string; name?: string; colorHex?: string }) {
+    if (!mongoose.isValidObjectId(id) || !mongoose.isValidObjectId(data.projectId)) {
+        return actionError("Invalid id");
+    }
+
+    const access = await requireProjectManagerAccess(data.projectId);
+    if (!access.ok) {
+        return actionError(access.message);
+    }
+
+    await connectToDatabase();
+
+    try {
+        const existing = await SpecialtyRepository.findById(id);
+        if (!existing || existing.projectId.toString() !== data.projectId) {
+            return actionError("Specialty not found in current project");
+        }
+
+        if (data.name && data.name !== existing.name) {
+            const nameConflict = await SpecialtyRepository.findByNameInProject(data.name, data.projectId);
+            if (nameConflict && nameConflict._id.toString() !== id) {
+                return actionError("A specialty with this name already exists in this project");
+            }
+        }
+
+        const specialty = await SpecialtyRepository.update(id, {
+            ...(data.name ? { name: data.name } : {}),
+            ...(data.colorHex ? { colorHex: data.colorHex } : {}),
+        });
+        revalidatePath('/manage-project');
+        return actionSuccess(specialty);
+    } catch (error) {
+        console.error("Failed to update specialty:", error);
+        return actionError("Failed to update specialty");
+    }
+}
+
+export async function deleteSpecialty(id: string, projectId: string) {
+    if (!mongoose.isValidObjectId(id) || !mongoose.isValidObjectId(projectId)) {
+        return actionError("Invalid id");
+    }
+
+    const access = await requireProjectManagerAccess(projectId);
+    if (!access.ok) {
+        return actionError(access.message);
+    }
+
+    await connectToDatabase();
+
+    try {
+        const existing = await SpecialtyRepository.findById(id);
+        if (!existing || existing.projectId.toString() !== projectId) {
+            return actionError("Specialty not found in current project");
+        }
+
+        const rolesUsingSpecialty = await roleRepository.countByProjectAndSpecialty(projectId, id);
+        if (rolesUsingSpecialty > 0) {
+            return actionError(`Cannot delete specialty: ${rolesUsingSpecialty} role(s) still depend on it`);
+        }
+
+        const usersUsingSpecialty = await UserRepository.countByProjectSpecialty(projectId, id);
+        const legacyUsersUsingSpecialty = await UserRepository.countLegacyByProjectSpecialty(projectId, id);
+        const totalUsersUsingSpecialty = usersUsingSpecialty + legacyUsersUsingSpecialty;
+        if (totalUsersUsingSpecialty > 0) {
+            return actionError(`Cannot delete specialty: ${totalUsersUsingSpecialty} user(s) are assigned to it in this project`);
+        }
+
+        await SpecialtyRepository.delete(id);
+        revalidatePath('/manage-project');
+        return actionSuccess(true);
+    } catch (error) {
+        console.error("Failed to delete specialty:", error);
+        return actionError("Failed to delete specialty");
+    }
+}
+
+// ─── Status Management Actions ───────────────────────────────────
+
+export async function createStatus(data: { projectId: string; name: string; colorHex: string; isPPC?: boolean }) {
+    if (!mongoose.isValidObjectId(data.projectId)) {
+        return actionError("Invalid project id");
+    }
+
+    const access = await requireProjectManagerAccess(data.projectId);
+    if (!access.ok) {
+        return actionError(access.message);
+    }
+
+    await connectToDatabase();
+
+    try {
+        const status = await statusRepository.create({
+            name: data.name,
+            colorHex: data.colorHex,
+            isPPC: data.isPPC,
+        });
+        revalidatePath('/manage-project');
+        return actionSuccess(status);
+    } catch (error) {
+        console.error("Failed to create status:", error);
+        return actionError("Failed to create status");
+    }
+}
+
+export async function updateStatus(id: string, data: { projectId: string; name?: string; colorHex?: string; isPPC?: boolean }) {
+    if (!mongoose.isValidObjectId(id) || !mongoose.isValidObjectId(data.projectId)) {
+        return actionError("Invalid id");
+    }
+
+    const access = await requireProjectManagerAccess(data.projectId);
+    if (!access.ok) {
+        return actionError(access.message);
+    }
+
+    await connectToDatabase();
+
+    try {
+        const status = await statusRepository.update(id, {
+            ...(typeof data.name !== 'undefined' ? { name: data.name } : {}),
+            ...(typeof data.colorHex !== 'undefined' ? { colorHex: data.colorHex } : {}),
+            ...(typeof data.isPPC !== 'undefined' ? { isPPC: data.isPPC } : {}),
+        });
+        revalidatePath('/manage-project');
+        return actionSuccess(status);
+    } catch (error) {
+        console.error("Failed to update status:", error);
+        return actionError("Failed to update status");
+    }
+}
+
+export async function deleteStatus(id: string, projectId: string) {
+    if (!mongoose.isValidObjectId(id) || !mongoose.isValidObjectId(projectId)) {
+        return actionError("Invalid id");
+    }
+
+    const access = await requireProjectManagerAccess(projectId);
+    if (!access.ok) {
+        return actionError(access.message);
+    }
+
+    await connectToDatabase();
+
+    try {
+        await statusRepository.delete(id);
+        revalidatePath('/manage-project');
+        return actionSuccess(true);
+    } catch (error) {
+        console.error("Failed to delete status:", error);
+        return actionError("Failed to delete status");
+    }
+}
+
+// ─── Role Management Actions ─────────────────────────────────────
+
+export async function createRole(data: { projectId: string; name: string; isManager: boolean; specialtiesIds?: string[] }) {
+    if (!mongoose.isValidObjectId(data.projectId)) {
+        return actionError("Invalid project id");
+    }
+
+    const access = await requireProjectManagerAccess(data.projectId);
+    if (!access.ok) {
+        return actionError(access.message);
+    }
+
+    await connectToDatabase();
+
+    try {
+        const existing = await roleRepository.findByNameInProject(data.name, data.projectId);
+        if (existing) {
+            return actionError("A role with this name already exists in this project");
+        }
+
+        const specialtiesIds = data.isManager ? [] : (data.specialtiesIds || []);
+        if (specialtiesIds.length > 0) {
+            const specialties = await SpecialtyRepository.findByIdsInProject(specialtiesIds, data.projectId);
+            if (specialties.length !== specialtiesIds.length) {
+                return actionError("Some selected specialties are invalid for this project");
+            }
+        }
+
+        const role = await roleRepository.create({
+            projectId: new mongoose.Types.ObjectId(data.projectId),
+            name: data.name,
+            isManager: data.isManager,
+            specialtiesIds: specialtiesIds.map((id) => new mongoose.Types.ObjectId(id)),
+        });
+        revalidatePath('/manage-project');
+        return actionSuccess(role);
+    } catch (error) {
+        console.error("Failed to create role:", error);
+        return actionError("Failed to create role");
+    }
+}
+
+export async function updateRole(
+    id: string,
+    data: { projectId: string; name?: string; isManager?: boolean; specialtiesIds?: string[] }
+) {
+    if (!mongoose.isValidObjectId(id) || !mongoose.isValidObjectId(data.projectId)) {
+        return actionError("Invalid id");
+    }
+
+    const access = await requireProjectManagerAccess(data.projectId);
+    if (!access.ok) {
+        return actionError(access.message);
+    }
+
+    await connectToDatabase();
+
+    try {
+        const existing = await roleRepository.getByIdInProject(id, data.projectId);
+        if (!existing) {
+            return actionError("Role not found in current project");
+        }
+
+        if (data.name && data.name !== existing.name) {
+            const nameConflict = await roleRepository.findByNameInProject(data.name, data.projectId);
+            if (nameConflict && nameConflict._id.toString() !== id) {
+                return actionError("A role with this name already exists in this project");
+            }
+        }
+
+        let resolvedSpecialtiesIds = data.specialtiesIds;
+        if (typeof resolvedSpecialtiesIds === 'undefined') {
+            resolvedSpecialtiesIds = (existing.specialtiesIds || []).map((specId) => specId.toString());
+        }
+
+        const resolvedIsManager = typeof data.isManager === 'boolean' ? data.isManager : existing.isManager;
+        if (resolvedIsManager) {
+            resolvedSpecialtiesIds = [];
+        }
+
+        if ((resolvedSpecialtiesIds || []).length > 0) {
+            const specialties = await SpecialtyRepository.findByIdsInProject(resolvedSpecialtiesIds || [], data.projectId);
+            if (specialties.length !== (resolvedSpecialtiesIds || []).length) {
+                return actionError("Some selected specialties are invalid for this project");
+            }
+        }
+
+        if ((resolvedSpecialtiesIds || []).length > 0) {
+            const conflicts = await UserRepository.findRoleSpecialtyConflicts(data.projectId, id, resolvedSpecialtiesIds || []);
+            const legacyConflicts = await UserRepository.findLegacyRoleSpecialtyConflicts(data.projectId, existing.name, resolvedSpecialtiesIds || []);
+            const totalConflicts = conflicts.length + legacyConflicts.length;
+            if (totalConflicts > 0) {
+                return actionError(`Cannot apply changes: ${totalConflicts} user(s) have specialties outside the allowed set for this role`);
+            }
+        }
+
+        const role = await roleRepository.update(id, {
+            ...(data.name ? { name: data.name } : {}),
+            ...(typeof data.isManager === 'boolean' ? { isManager: data.isManager } : {}),
+            specialtiesIds: (resolvedSpecialtiesIds || []).map((specId) => new mongoose.Types.ObjectId(specId)),
+        });
+        revalidatePath('/manage-project');
+        return actionSuccess(role);
+    } catch (error) {
+        console.error("Failed to update role:", error);
+        return actionError("Failed to update role");
+    }
+}
+
+export async function deleteRole(id: string, projectId: string) {
+    if (!mongoose.isValidObjectId(id) || !mongoose.isValidObjectId(projectId)) {
+        return actionError("Invalid id");
+    }
+
+    const access = await requireProjectManagerAccess(projectId);
+    if (!access.ok) {
+        return actionError(access.message);
+    }
+
+    await connectToDatabase();
+
+    try {
+        const existing = await roleRepository.getByIdInProject(id, projectId);
+        if (!existing) {
+            return actionError("Role not found in current project");
+        }
+
+        const usersUsingRole = await UserRepository.countByProjectRole(projectId, id);
+        const legacyUsersUsingRole = await UserRepository.countLegacyByProjectRoleName(projectId, existing.name);
+        const totalUsersUsingRole = usersUsingRole + legacyUsersUsingRole;
+        if (totalUsersUsingRole > 0) {
+            return actionError(`Cannot delete role: ${totalUsersUsingRole} user(s) are assigned to it in this project`);
+        }
+
+        await roleRepository.delete(id);
+        revalidatePath('/manage-project');
+        return actionSuccess(true);
+    } catch (error) {
+        console.error("Failed to delete role:", error);
+        return actionError("Failed to delete role");
+    }
+}
+
+

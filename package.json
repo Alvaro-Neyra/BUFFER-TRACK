@@ -6,18 +6,24 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "migrate:memberships": "node scripts/backfill-project-memberships.mjs",
+    "migrate:memberships:dry": "node scripts/backfill-project-memberships.mjs --dry-run",
+    "sync:subcontractor-specialties:dry": "node scripts/sync-subcontractor-specialties.mjs",
+    "sync:subcontractor-specialties": "node scripts/sync-subcontractor-specialties.mjs --apply"
   },
   "dependencies": {
+    "@panzoom/panzoom": "^4.6.1",
+    "@pixi/react": "^8.0.5",
     "bcryptjs": "^3.0.3",
     "clsx": "^2.1.1",
     "lucide-react": "^0.577.0",
     "mongoose": "^9.2.4",
-    "next": "14.2.35",
+    "next": "15.5.12",
     "next-auth": "^5.0.0-beta.30",
-    "react": "^18",
-    "react-dom": "^18",
-    "react-zoom-pan-pinch": "^3.7.0",
+    "pixi.js": "^8.2.6",
+    "react": "^19",
+    "react-dom": "^19",
     "recharts": "^3.8.0",
     "socket.io": "^4.8.3",
     "socket.io-client": "^4.8.3",
@@ -26,14 +32,16 @@
     "zustand": "^5.0.11"
   },
   "devDependencies": {
+    "@tailwindcss/postcss": "^4.2.1",
     "@types/bcryptjs": "^2.4.6",
     "@types/node": "^20",
-    "@types/react": "^18",
-    "@types/react-dom": "^18",
-    "eslint": "^8",
-    "eslint-config-next": "14.2.35",
-    "postcss": "^8",
-    "tailwindcss": "^3.4.1",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@eslint/eslintrc": "^3.2.0",
+    "eslint": "^9",
+    "eslint-config-next": "15.5.12",
+    "postcss": "^8.5.8",
+    "tailwindcss": "^4.2.1",
     "typescript": "^5"
   }
 }

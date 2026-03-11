@@ -1,6 +1,6 @@
 import mongoose, { Schema, Document } from 'mongoose';
 
-export type TPinStatus = 'Request' | 'Notified' | 'Committed' | 'In Progress' | 'Completed' | 'Delayed' | 'Restricted';
+export type TPinStatus = string;
 
 export interface ICommitment extends Document {
     projectId: mongoose.Types.ObjectId;
@@ -9,14 +9,20 @@ export interface ICommitment extends Document {
     specialtyId: mongoose.Types.ObjectId;
     requesterId: mongoose.Types.ObjectId;
     assignedTo?: mongoose.Types.ObjectId;
+    name: string;
+    customId?: string;
+    location?: string;
     description: string;
     status: TPinStatus;
     coordinates: {
         xPercent: number;
         yPercent: number;
     };
+    // Optional free-draw polygon zone (array of percentage-based points)
+    polygon?: Array<{ xPercent: number; yPercent: number }>;
     dates: {
         requestDate: Date;
+        startDate?: Date;
         targetDate?: Date;
         actualCompletionDate?: Date;
     };
@@ -36,10 +42,12 @@ const CommitmentSchema: Schema = new Schema(
         specialtyId: { type: Schema.Types.ObjectId, ref: 'Specialty', required: true, index: true },
         requesterId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
         assignedTo: { type: Schema.Types.ObjectId, ref: 'User', index: true },
-        description: { type: String, required: true },
+        name: { type: String, required: true },
+        customId: { type: String },
+        location: { type: String },
+        description: { type: String },
         status: {
             type: String,
-            enum: ['Request', 'Notified', 'Committed', 'In Progress', 'Completed', 'Delayed', 'Restricted'],
             default: 'Request',
             required: true,
         },
@@ -47,8 +55,15 @@ const CommitmentSchema: Schema = new Schema(
             xPercent: { type: Number, required: true, min: 0, max: 100 },
             yPercent: { type: Number, required: true, min: 0, max: 100 },
         },
+        // Optional: free-draw polygon zone for activity areas on floor plans.
+        // The `coordinates` field holds the centroid for pin/label placement.
+        polygon: [{
+            xPercent: { type: Number, min: 0, max: 100 },
+            yPercent: { type: Number, min: 0, max: 100 },
+        }],
         dates: {
             requestDate: { type: Date, required: true, default: Date.now },
+            startDate: { type: Date },
             targetDate: { type: Date },
             actualCompletionDate: { type: Date },
         },

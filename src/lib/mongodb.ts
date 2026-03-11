@@ -19,6 +19,8 @@ import '@/models/Floor';
 import '@/models/Commitment';
 import '@/models/Restriction';
 import '@/models/Specialty';
+import '@/models/Role';
+import '@/models/Status';
 import '@/models/WeeklySnapshot';
 
 const MONGODB_URI = process.env.MONGODB_URI!;
