@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { useRouter } from "next/navigation";
+import Link from "next/link";
 
 interface IFloorOption {
     _id: string;
@@ -22,8 +22,6 @@ export const FloorSelectorModal = ({
     floors,
     onClose,
 }: Readonly<IFloorSelectorModalProps>) => {
-    const router = useRouter();
-
     const sortedFloors = [...floors].sort((a, b) => a.order - b.order);
 
     return (
@@ -49,9 +47,9 @@ export const FloorSelectorModal = ({
                     ) : (
                         <div className="space-y-2">
                             {sortedFloors.map((floor) => (
-                                <button
+                                <Link
                                     key={floor._id}
-                                    onClick={() => router.push(`/detail/${floor._id}`)}
+                                    href={`/detail/${floor._id}`}
                                     className="w-full flex items-center gap-3 px-4 py-3 bg-neutral-50 dark:bg-neutral-800/50 border border-neutral-200 dark:border-neutral-700 rounded-lg hover:bg-primary/5 hover:border-primary/30 dark:hover:bg-primary/10 transition-all group"
                                 >
                                     <div className="size-9 rounded-lg bg-primary/10 text-primary flex items-center justify-center shrink-0 group-hover:bg-primary group-hover:text-white transition-colors">
@@ -62,7 +60,7 @@ export const FloorSelectorModal = ({
                                         <p className="text-xs text-neutral-500">Level {floor.order}</p>
                                     </div>
                                     <span className="material-symbols-outlined text-neutral-400 ml-auto">chevron_right</span>
-                                </button>
+                                </Link>
                             ))}
                         </div>
                     )}

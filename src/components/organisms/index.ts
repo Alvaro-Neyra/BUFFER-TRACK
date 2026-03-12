@@ -5,4 +5,3 @@ export * from "./InteractivePlanViewer";
 export * from "./NewCommitmentModal";
 export * from "./PendingTasksSidebar";
 export * from "./PlanViewer";
-export * from "./ProjectKPIs";

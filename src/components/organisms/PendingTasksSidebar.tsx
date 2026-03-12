@@ -2,6 +2,7 @@
 
 import React, { useState, useMemo } from "react";
 import type { IPendingCommitment } from "@/components/organisms/MasterPlanPage";
+import Link from "next/link";
 
 interface IPendingTasksSidebarProps {
     commitments: IPendingCommitment[];
@@ -30,7 +31,7 @@ export const PendingTasksSidebar = ({ commitments, onTaskClick }: IPendingTasksS
     });
 
     return (
-        <div className="w-80 lg:w-96 bg-neutral-50 dark:bg-neutral-900 border-l border-neutral-200 dark:border-neutral-800 flex flex-col hidden md:flex shrink-0">
+        <div className="w-80 lg:w-96 bg-neutral-50 dark:bg-neutral-900 border-l border-neutral-200 dark:border-neutral-800 flex flex-col md:flex shrink-0">
             <div className="p-6 pb-4 border-b border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 z-10 sticky top-0 flex flex-col gap-4">
                 <h3 className="text-neutral-900 dark:text-white text-lg font-bold leading-tight flex items-center gap-2">
                     <span className="material-symbols-outlined text-primary">task</span>
@@ -86,9 +87,9 @@ export const PendingTasksSidebar = ({ commitments, onTaskClick }: IPendingTasksS
                                     </div>
                                 </div>
                                 <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold tracking-wide shrink-0 ${task.status === "Completed" ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400" :
-                                        task.status === "In Progress" ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400" :
-                                            task.status === "Delayed" ? "bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400" :
-                                                "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
+                                    task.status === "In Progress" ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400" :
+                                        task.status === "Delayed" ? "bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400" :
+                                            "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
                                     }`}>
                                     {task.status === "In Progress" ? "In progress" :
                                         task.status === "Completed" ? "Completed" :
@@ -114,10 +115,13 @@ export const PendingTasksSidebar = ({ commitments, onTaskClick }: IPendingTasksS
             </div>
 
             <div className="p-4 border-t border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 z-10">
-                <button className="w-full py-2.5 text-sm font-bold text-primary border border-primary/20 hover:bg-primary/5 rounded-md transition-colors flex items-center justify-center gap-2">
+                <Link
+                    href="/commitments"
+                    className="w-full py-2.5 text-sm font-bold text-primary border border-primary/20 hover:bg-primary/5 rounded-md transition-colors flex items-center justify-center gap-2"
+                >
                     <span>View All Tasks</span>
                     <span className="material-symbols-outlined text-[18px]">arrow_forward</span>
-                </button>
+                </Link>
             </div>
         </div>
     );

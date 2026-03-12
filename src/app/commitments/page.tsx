@@ -48,8 +48,10 @@ export default async function CommitmentsPage({
         <CommitmentsView
             commitments={data.commitments}
             restrictions={data.restrictions}
+            statuses={data.statuses}
             projectsList={projectsList}
             currentProjectId={currentProjectId}
+            redListEnabled={data.redListEnabled}
             isManager={data.isManager}
         />
     );

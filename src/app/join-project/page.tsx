@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { GlobalHeader } from "@/components/organisms/GlobalHeader";
 
@@ -15,7 +16,7 @@ export default function JoinProjectPage() {
         // Add actual API join call here later
         setTimeout(() => {
             setIsLoading(false);
-            router.push("/dashboard");
+            router.push("/");
         }, 1000);
     };
 
@@ -64,12 +65,12 @@ export default function JoinProjectPage() {
                         </form>
 
                         <div className="mt-8 pt-6 border-t border-neutral-200 dark:border-neutral-800 text-center">
-                            <button
-                                onClick={() => router.push("/login")}
+                            <Link
+                                href="/login"
                                 className="text-sm font-semibold text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 transition-colors"
                             >
                                 Return to Login
-                            </button>
+                            </Link>
                         </div>
                     </div>
                 </div>

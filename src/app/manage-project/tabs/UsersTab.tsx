@@ -39,7 +39,7 @@ export function UsersTab({ pendingUsers, activeUsers, currentProjectId }: IUsers
             <div className="flex gap-4 border-b border-neutral-200 dark:border-neutral-800">
                 <button
                     onClick={() => setFilter("pending")}
-                    className={`pb-3 text-sm font-bold border-b-2 transition-colors flex items-center gap-2 ${filter === "pending" ? "text-primary border-primary" : "text-neutral-500 border-transparent hover:text-neutral-700"}`}
+                    className={`pb-3 text-sm font-bold border-b-2 transition-colors flex items-center gap-2 ${filter === "pending" ? "text-primary border-primary" : "text-neutral-500 border-transparent hover:text-neutral-700"} cursor-pointer`}
                 >
                     Pending Requests
                     {pendingUsers.length > 0 && (
@@ -48,7 +48,7 @@ export function UsersTab({ pendingUsers, activeUsers, currentProjectId }: IUsers
                 </button>
                 <button
                     onClick={() => setFilter("active")}
-                    className={`pb-3 text-sm font-bold border-b-2 transition-colors flex items-center gap-2 ${filter === "active" ? "text-primary border-primary" : "text-neutral-500 border-transparent hover:text-neutral-700"}`}
+                    className={`pb-3 text-sm font-bold border-b-2 transition-colors flex items-center gap-2 ${filter === "active" ? "text-primary border-primary" : "text-neutral-500 border-transparent hover:text-neutral-700"} cursor-pointer`}
                 >
                     Active Users
                     <span className="bg-neutral-200 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 text-[10px] px-1.5 py-0.5 rounded-full font-bold">{activeUsers.length}</span>
@@ -64,7 +64,7 @@ export function UsersTab({ pendingUsers, activeUsers, currentProjectId }: IUsers
                     </div>
                 ) : (
                     <div className="overflow-x-auto">
-                        <table className="w-full text-left text-sm text-neutral-600 dark:text-neutral-300 min-w-[700px]">
+                        <table className="w-full text-left text-sm text-neutral-600 dark:text-neutral-300 min-w-175">
                             <thead className="bg-neutral-50 dark:bg-neutral-800/50 text-xs uppercase font-bold text-neutral-500 border-b border-neutral-200 dark:border-neutral-800">
                                 <tr>
                                     <th className="px-6 py-4">Name</th>

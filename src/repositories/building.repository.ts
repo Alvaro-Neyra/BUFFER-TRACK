@@ -13,11 +13,33 @@ export class BuildingRepository {
         await connectToDatabase();
     }
 
+    private static escapeRegex(input: string): string {
+        return input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }
+
     /** Find all buildings belonging to a specific project. */
     static async findByProjectId(projectId: string): Promise<IBuilding[]> {
         await this.connect();
         return Building.find({ projectId: new mongoose.Types.ObjectId(projectId) })
             .sort({ number: 1 })
+            .lean() as Promise<IBuilding[]>;
+    }
+
+    /** Search buildings by name or code within a specific project. */
+    static async searchByProject(projectId: string, query: string, limit = 8): Promise<IBuilding[]> {
+        await this.connect();
+        const escapedQuery = this.escapeRegex(query.trim());
+        const pattern = new RegExp(escapedQuery, 'i');
+
+        return Building.find({
+            projectId: new mongoose.Types.ObjectId(projectId),
+            $or: [
+                { name: pattern },
+                { code: pattern },
+            ],
+        })
+            .sort({ number: 1, name: 1 })
+            .limit(limit)
             .lean() as Promise<IBuilding[]>;
     }
 

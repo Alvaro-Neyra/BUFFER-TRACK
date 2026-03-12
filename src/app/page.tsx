@@ -33,7 +33,17 @@ function entityIdToString(entity: { _id?: { toString: () => string } | string } 
   return typeof entity._id === "string" ? entity._id : entity._id.toString();
 }
 
-export default async function Home() {
+function getStringSearchParam(value: string | string[] | undefined): string | null {
+  if (!value) return null;
+  return Array.isArray(value) ? value[0] || null : value;
+}
+
+export default async function Home({
+  searchParams,
+}: {
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
+}) {
+  const resolvedSearchParams = await searchParams;
   const session = await auth();
   if (!session?.user) {
     redirect("/login");
@@ -93,6 +103,7 @@ export default async function Home() {
       masterPlanImageUrl={project?.masterPlanImageUrl || ""}
       buildings={serializedBuildings}
       commitments={serializedCommitments}
+      initialOpenBuildingId={getStringSearchParam(resolvedSearchParams.openBuildingId)}
     />
   );
 }

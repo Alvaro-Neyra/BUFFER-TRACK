@@ -32,6 +32,7 @@ interface IHotspotData {
     name?: string;     // building name
     code?: string;     // building code
     description?: string; // activity description
+    commitmentCount?: number; // number of commitments (for building hotspots)
     coordinates: { xPercent: number; yPercent: number };
     polygon?: Array<{ xPercent: number; yPercent: number }>;
     color?: string;
@@ -64,6 +65,16 @@ interface IInteractivePlanViewerProps {
 const POLY_COLORS = ["#8B5CF6", "#3B82F6", "#F59E0B", "#10B981", "#EC4899", "#06B6D4"];
 const MAX_SCALE = 100;
 const PAN_STEP = 50;
+
+function getHotspotLabel(hotspot: IHotspotData): string {
+    const isBuildingHotspot = Array.isArray(hotspot.floors);
+    if (isBuildingHotspot) {
+        const count = Math.max(0, hotspot.commitmentCount ?? 0);
+        return count === 1 ? "1 commitment" : `${count} commitments`;
+    }
+
+    return hotspot.code || hotspot.name || hotspot.description || "";
+}
 
 export const InteractivePlanViewer = ({
     imageUrl,
@@ -585,7 +596,7 @@ export const InteractivePlanViewer = ({
                                     className="bg-neutral-900 text-white font-bold px-1.5 py-0.5 rounded shadow-lg"
                                     style={{ fontSize: `${Math.max(labelFontSize, 9)}px` }}
                                 >
-                                    NUEVO
+                                    NEW
                                 </div>
                             </div>
                         </div>
@@ -672,7 +683,7 @@ export const InteractivePlanViewer = ({
                                     className="bg-neutral-900 text-white font-bold px-1.5 py-0.5 rounded shadow-lg"
                                     style={{ fontSize: `${Math.max(labelFontSize, 9)}px` }}
                                 >
-                                    {hotspot.code || hotspot.name || hotspot.description}
+                                    {getHotspotLabel(hotspot)}
                                 </div>
                             </div>
                         </div>
@@ -732,7 +743,7 @@ export const InteractivePlanViewer = ({
                                         if (onHotspotSelect) onHotspotSelect(h);
                                         else setSelectedHotspot(h);
                                     }}
-                                    className="flex items-center gap-1 hover:opacity-80 transition-opacity text-left"
+                                    className="flex items-center gap-1 hover:opacity-80 transition-opacity text-left cursor-pointer"
                                 >
                                     <div
                                         className="w-1.5 h-1.5 rounded-full"

@@ -97,7 +97,7 @@ export function AdminUsersView({ pendingUsers, activeUsers, currentProjectId }: 
                                     <p className="font-medium text-sm">No {filter} users found.</p>
                                 </div>
                             ) : (
-                                <table className="w-full text-left text-sm text-neutral-600 dark:text-neutral-300 min-w-[800px]">
+                                <table className="w-full text-left text-sm text-neutral-600 dark:text-neutral-300 min-w-200">
                                     <thead className="bg-neutral-50 dark:bg-neutral-800/50 text-xs uppercase font-bold text-neutral-500 border-b border-neutral-200 dark:border-neutral-800 sticky top-0 z-10">
                                         <tr>
                                             <th className="px-6 py-4">Name</th>

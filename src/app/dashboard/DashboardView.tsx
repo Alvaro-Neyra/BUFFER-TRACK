@@ -16,6 +16,7 @@ interface DashboardViewProps {
         ppcByZone: { _id?: string; level: string; ppc: number; total: number; completed: number; }[];
         subcontractorLoad: { _id: string; name: string; company: string; current: number; next: number; }[];
         activeRestrictions: { id: string; description: string; solver: string; reportedBy: string; commitmentId: string; date: string; }[];
+        redListEnabled: boolean;
         isManager: boolean;
     };
     projectsList: { id: string, name: string }[];
@@ -109,7 +110,7 @@ export function DashboardView({ metrics, projectsList, currentProjectId, current
                     </div>
 
                     {/* KPI Cards */}
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                    <div className={`grid grid-cols-1 ${metrics.redListEnabled ? "md:grid-cols-3" : "md:grid-cols-2"} gap-6 mb-8`}>
                         <div className="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-6 shadow-sm">
                             <div className="text-xs font-bold text-neutral-500 uppercase tracking-wide mb-2">PPC Global</div>
                             <div className="flex items-end gap-3">
@@ -130,15 +131,17 @@ export function DashboardView({ metrics, projectsList, currentProjectId, current
                             </div>
                         </div>
 
-                        <div className="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-6 shadow-sm">
-                            <div className="text-xs font-bold text-neutral-500 uppercase tracking-wide mb-2">The Red List (Active Blockers)</div>
-                            <div className="flex items-end gap-3">
-                                <span className="text-4xl font-black text-danger">{metrics.activeRestrictions.length}</span>
-                                <span className="text-danger bg-danger/10 px-2 py-1 rounded text-xs font-bold mb-1 flex items-center">
-                                    <span className="material-symbols-outlined text-xs mr-1">warning</span>Pending
-                                </span>
+                        {metrics.redListEnabled && (
+                            <div className="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-6 shadow-sm">
+                                <div className="text-xs font-bold text-neutral-500 uppercase tracking-wide mb-2">The Red List (Active Blockers)</div>
+                                <div className="flex items-end gap-3">
+                                    <span className="text-4xl font-black text-danger">{metrics.activeRestrictions.length}</span>
+                                    <span className="text-danger bg-danger/10 px-2 py-1 rounded text-xs font-bold mb-1 flex items-center">
+                                        <span className="material-symbols-outlined text-xs mr-1">warning</span>Pending
+                                    </span>
+                                </div>
                             </div>
-                        </div>
+                        )}
                     </div>
 
                     {/* Complex Data Views */}
@@ -158,7 +161,7 @@ export function DashboardView({ metrics, projectsList, currentProjectId, current
                                 {metrics.subcontractorLoad.length === 0 ? (
                                     <div className="h-full flex items-center justify-center text-neutral-500 text-sm">No data available</div>
                                 ) : (
-                                    <table className="w-full text-left border-collapse text-sm min-w-[300px]">
+                                    <table className="w-full text-left border-collapse text-sm min-w-75">
                                         <thead>
                                             <tr>
                                                 <th className="font-semibold text-neutral-500 dark:text-neutral-400 border-b border-neutral-200 dark:border-neutral-800 pb-3">Subcontractor/User</th>
@@ -213,50 +216,52 @@ export function DashboardView({ metrics, projectsList, currentProjectId, current
                     </div>
 
                     {/* The Red List */}
-                    <div className="bg-white dark:bg-neutral-900 border border-danger/20 rounded-xl p-6 shadow-sm flex flex-col">
-                        <div className="flex items-center gap-2 mb-6">
-                            <span className="material-symbols-outlined text-danger text-xl">warning</span>
-                            <h3 className="text-sm font-bold text-neutral-900 dark:text-neutral-100">The Red List (Active Constraints)</h3>
-                        </div>
+                    {metrics.redListEnabled && (
+                        <div className="bg-white dark:bg-neutral-900 border border-danger/20 rounded-xl p-6 shadow-sm flex flex-col">
+                            <div className="flex items-center gap-2 mb-6">
+                                <span className="material-symbols-outlined text-danger text-xl">warning</span>
+                                <h3 className="text-sm font-bold text-neutral-900 dark:text-neutral-100">The Red List (Active Constraints)</h3>
+                            </div>
 
-                        <div className="overflow-x-auto">
-                            {metrics.activeRestrictions.length === 0 ? (
-                                <div className="py-8 flex flex-col items-center justify-center text-neutral-500">
-                                    <span className="material-symbols-outlined text-4xl mb-2 text-emerald-500/50">check_circle</span>
-                                    <p className="text-sm">There are no active constraints right now. Excellent work!</p>
-                                </div>
-                            ) : (
-                                <table className="w-full text-left border-collapse text-sm min-w-[600px]">
-                                    <thead>
-                                        <tr>
-                                            <th className="font-semibold text-neutral-500 dark:text-neutral-400 border-b border-neutral-200 dark:border-neutral-800 pb-3 pl-2">Description</th>
-                                            <th className="font-semibold text-neutral-500 dark:text-neutral-400 border-b border-neutral-200 dark:border-neutral-800 pb-3">Location</th>
-                                            <th className="font-semibold text-neutral-500 dark:text-neutral-400 border-b border-neutral-200 dark:border-neutral-800 pb-3">Reported By</th>
-                                            <th className="font-semibold text-neutral-500 dark:text-neutral-400 border-b border-neutral-200 dark:border-neutral-800 pb-3">Solver</th>
-                                            <th className="font-semibold text-neutral-500 dark:text-neutral-400 border-b border-neutral-200 dark:border-neutral-800 pb-3 text-right pr-2">Action</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {metrics.activeRestrictions.map((rest, idx) => (
-                                            <tr key={idx} className="border-b border-neutral-100 dark:border-neutral-800/50 last:border-0 hover:bg-rose-50/50 dark:hover:bg-rose-900/10 transition-colors">
-                                                <td className="py-4 pl-2 font-medium text-neutral-800 dark:text-neutral-200 max-w-xs truncate" title={rest.description}>
-                                                    {rest.description}
-                                                </td>
-                                                <td className="py-4 text-neutral-600 dark:text-neutral-400">{rest.commitmentId}</td>
-                                                <td className="py-4 text-neutral-600 dark:text-neutral-400">{rest.reportedBy}</td>
-                                                <td className="py-4 font-bold text-neutral-800 dark:text-neutral-200">{rest.solver}</td>
-                                                <td className="py-4 text-right pr-2">
-                                                    <button className="text-secondary hover:text-primary transition-colors text-xs font-bold uppercase flex items-center justify-end w-full">
-                                                        View Pin <span className="material-symbols-outlined text-[16px] ml-1">arrow_forward</span>
-                                                    </button>
-                                                </td>
+                            <div className="overflow-x-auto">
+                                {metrics.activeRestrictions.length === 0 ? (
+                                    <div className="py-8 flex flex-col items-center justify-center text-neutral-500">
+                                        <span className="material-symbols-outlined text-4xl mb-2 text-emerald-500/50">check_circle</span>
+                                        <p className="text-sm">There are no active constraints right now. Excellent work!</p>
+                                    </div>
+                                ) : (
+                                    <table className="w-full text-left border-collapse text-sm min-w-150">
+                                        <thead>
+                                            <tr>
+                                                <th className="font-semibold text-neutral-500 dark:text-neutral-400 border-b border-neutral-200 dark:border-neutral-800 pb-3 pl-2">Description</th>
+                                                <th className="font-semibold text-neutral-500 dark:text-neutral-400 border-b border-neutral-200 dark:border-neutral-800 pb-3">Location</th>
+                                                <th className="font-semibold text-neutral-500 dark:text-neutral-400 border-b border-neutral-200 dark:border-neutral-800 pb-3">Reported By</th>
+                                                <th className="font-semibold text-neutral-500 dark:text-neutral-400 border-b border-neutral-200 dark:border-neutral-800 pb-3">Solver</th>
+                                                <th className="font-semibold text-neutral-500 dark:text-neutral-400 border-b border-neutral-200 dark:border-neutral-800 pb-3 text-right pr-2">Action</th>
                                             </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            )}
+                                        </thead>
+                                        <tbody>
+                                            {metrics.activeRestrictions.map((rest, idx) => (
+                                                <tr key={idx} className="border-b border-neutral-100 dark:border-neutral-800/50 last:border-0 hover:bg-rose-50/50 dark:hover:bg-rose-900/10 transition-colors">
+                                                    <td className="py-4 pl-2 font-medium text-neutral-800 dark:text-neutral-200 max-w-xs truncate" title={rest.description}>
+                                                        {rest.description}
+                                                    </td>
+                                                    <td className="py-4 text-neutral-600 dark:text-neutral-400">{rest.commitmentId}</td>
+                                                    <td className="py-4 text-neutral-600 dark:text-neutral-400">{rest.reportedBy}</td>
+                                                    <td className="py-4 font-bold text-neutral-800 dark:text-neutral-200">{rest.solver}</td>
+                                                    <td className="py-4 text-right pr-2">
+                                                        <button className="text-secondary hover:text-primary transition-colors text-xs font-bold uppercase flex items-center justify-end w-full">
+                                                            View Pin <span className="material-symbols-outlined text-[16px] ml-1">arrow_forward</span>
+                                                        </button>
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                )}
+                            </div>
                         </div>
-                    </div>
+                    )}
 
                 </div>
             </main>

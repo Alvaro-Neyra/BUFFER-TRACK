@@ -41,4 +41,8 @@ const BuildingSchema: Schema = new Schema(
     { timestamps: true }
 );
 
+// Project-scoped lookup indexes improve autocomplete performance in global search.
+BuildingSchema.index({ projectId: 1, name: 1 });
+BuildingSchema.index({ projectId: 1, code: 1 });
+
 export default mongoose.models.Building || mongoose.model<IBuilding>('Building', BuildingSchema);

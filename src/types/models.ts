@@ -60,3 +60,36 @@ export interface IProjectMembership {
     roleId?: string;
     specialtyId?: string;
 }
+
+/** Search result item for a building in the active project. */
+export interface IBuildingSearchResultDTO {
+    kind: 'building';
+    id: string;
+    name: string;
+    code: string;
+}
+
+/** Search result item for an activity in the active project. */
+export interface IActivitySearchResultDTO {
+    kind: 'activity';
+    id: string;
+    name: string;
+    customId?: string;
+    location?: string;
+    status: string;
+    buildingId: string;
+    buildingName: string;
+    buildingCode: string;
+    floorId: string;
+    floorLabel: string;
+    specialtyName: string;
+}
+
+/** Grouped global search payload for the header autocomplete. */
+export interface IGlobalSearchResultsDTO {
+    buildings: IBuildingSearchResultDTO[];
+    activities: IActivitySearchResultDTO[];
+}
+
+/** Union for navigation handlers in the global header search. */
+export type TGlobalSearchResultDTO = IBuildingSearchResultDTO | IActivitySearchResultDTO;
