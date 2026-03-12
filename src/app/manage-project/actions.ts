@@ -11,7 +11,10 @@ import { SpecialtyRepository } from "@/repositories/specialty.repository";
 import { statusRepository } from "@/repositories/status.repository";
 import { roleRepository } from "@/repositories/role.repository";
 import { CommitmentRepository } from "@/repositories/commitment.repository";
+import { RestrictionRepository } from "@/repositories/restriction.repository";
 import { UserRepository } from "@/repositories/user.repository";
+import { deleteCloudinaryAsset, extractCloudinaryPublicId } from "@/lib/cloudinary";
+import { isRestrictedStatus } from "@/lib/projectFeatures";
 import { revalidatePath } from "next/cache";
 import { actionSuccess, actionError } from "@/lib/apiResponse";
 import mongoose from "mongoose";
@@ -29,6 +32,15 @@ function asObjectIdString(value: unknown): string | null {
         return null;
     }
     return value;
+}
+
+function normalizeOptionalString(value: unknown): string | undefined {
+    if (typeof value !== "string") {
+        return undefined;
+    }
+
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
 }
 
 async function resolveProjectIdFromBuildingId(buildingId: string): Promise<string | null> {
@@ -126,22 +138,76 @@ async function requireProjectManagerAccess(projectId: string): Promise<TAccessRe
     return { ok: false, message: "Unauthorized" };
 }
 
+async function ensureRestrictedStatusAllowed(projectId: string, status: unknown): Promise<string | null> {
+    if (typeof status !== "string" || !isRestrictedStatus(status)) {
+        return null;
+    }
+
+    const redListEnabled = await ProjectService.isRedListEnabled(projectId);
+    if (!redListEnabled) {
+        return "Restricted status is unavailable because Red List is disabled for this project";
+    }
+
+    return null;
+}
+
 // ─── Project Settings Actions ─────────────────────────────────────
 
-export async function updateMasterPlanImage(projectId: string, imageUrl: string) {
+export async function updateMasterPlanImage(projectId: string, imageUrl: string, cloudinaryPublicId?: string) {
     const access = await requireProjectManagerAccess(projectId);
     if (!access.ok) {
         return actionError(access.message);
     }
 
+    const normalizedImageUrl = normalizeOptionalString(imageUrl);
+    if (!normalizedImageUrl) {
+        return actionError("Invalid image URL");
+    }
+
+    const resolvedPublicId =
+        normalizeOptionalString(cloudinaryPublicId) ??
+        extractCloudinaryPublicId(normalizedImageUrl) ??
+        undefined;
+
     await connectToDatabase();
 
+    const project = await ProjectRepository.findById(projectId);
+    if (!project) {
+        return actionError("Project not found");
+    }
+
+    const previousImageUrl = normalizeOptionalString(project.masterPlanImageUrl);
+    const previousPublicId = normalizeOptionalString(project.masterPlanCloudinaryPublicId);
+    const hasImageReplacement = previousImageUrl && previousImageUrl !== normalizedImageUrl;
+    let projectUpdated = false;
+
     try {
-        await ProjectRepository.updateById(projectId, { masterPlanImageUrl: imageUrl });
+        await ProjectRepository.updateById(projectId, {
+            masterPlanImageUrl: normalizedImageUrl,
+            masterPlanCloudinaryPublicId: resolvedPublicId ?? null,
+        });
+        projectUpdated = true;
+
+        if (hasImageReplacement) {
+            await deleteCloudinaryAsset({
+                url: previousImageUrl,
+                publicId: previousPublicId,
+                context: `replace-master-plan:${projectId}`,
+            });
+        }
+
         revalidatePath('/manage-project');
         revalidatePath('/');
         return actionSuccess(true);
     } catch (error) {
+        if (!projectUpdated) {
+            await deleteCloudinaryAsset({
+                url: normalizedImageUrl,
+                publicId: resolvedPublicId,
+                context: `rollback-master-plan:${projectId}`,
+            });
+        }
+
         console.error("Failed to update master plan image:", error);
         return actionError("Failed to update image");
     }
@@ -166,6 +232,63 @@ export async function handleUserProjectAccess(
     } catch (error) {
         console.error(`Failed to ${action} user ${userId}:`, error);
         return actionError("Database operation failed");
+    }
+}
+
+export async function setProjectRedListEnabled(projectId: string, enabled: boolean) {
+    if (!mongoose.isValidObjectId(projectId)) {
+        return actionError("Invalid project id");
+    }
+
+    const access = await requireProjectManagerAccess(projectId);
+    if (!access.ok) {
+        return actionError(access.message);
+    }
+
+    const session = await auth();
+    if (!session?.user || session.user.role.toLowerCase() !== "admin") {
+        return actionError("Only global admins can change Red List settings");
+    }
+
+    await connectToDatabase();
+
+    const project = await ProjectRepository.findById(projectId);
+    if (!project) {
+        return actionError("Project not found");
+    }
+
+    if (!enabled) {
+        const [activeRestrictionsCount, restrictedCommitmentsCount] = await Promise.all([
+            RestrictionRepository.countActiveByProject(projectId),
+            CommitmentRepository.countByQuery({
+                projectId: new mongoose.Types.ObjectId(projectId),
+                status: { $regex: /^restricted$/i },
+            }),
+        ]);
+
+        if (activeRestrictionsCount > 0) {
+            return actionError(`Cannot disable Red List while ${activeRestrictionsCount} active restriction(s) remain`);
+        }
+
+        if (restrictedCommitmentsCount > 0) {
+            return actionError(`Cannot disable Red List while ${restrictedCommitmentsCount} commitment(s) are still in Restricted status`);
+        }
+    }
+
+    try {
+        await ProjectRepository.updateById(projectId, {
+            "configuration.features.redList.enabled": enabled,
+        });
+
+        revalidatePath('/manage-project');
+        revalidatePath('/commitments');
+        revalidatePath('/dashboard');
+        revalidatePath('/');
+
+        return actionSuccess({ enabled });
+    } catch (error) {
+        console.error("Failed to update Red List setting:", error);
+        return actionError("Failed to update Red List setting");
     }
 }
 
@@ -260,7 +383,7 @@ export async function deleteBuilding(buildingId: string) {
 
 export async function createFloor(
     buildingId: string,
-    data: { label: string; order: number; gcsImageUrl: string }
+    data: { label: string; order: number; gcsImageUrl: string; cloudinaryPublicId?: string }
 ) {
     if (!mongoose.isValidObjectId(buildingId)) {
         return actionError("Invalid building id");
@@ -278,11 +401,22 @@ export async function createFloor(
 
     await connectToDatabase();
 
+    let floorCreated = false;
+
     try {
         const floor = await ProjectService.createFloor(buildingId, data);
+        floorCreated = true;
         revalidatePath('/manage-project');
         return actionSuccess(floor);
     } catch (error) {
+        if (!floorCreated) {
+            await deleteCloudinaryAsset({
+                url: data.gcsImageUrl,
+                publicId: data.cloudinaryPublicId,
+                context: `rollback-create-floor:${buildingId}`,
+            });
+        }
+
         console.error("Failed to create floor:", error);
         return actionError("Failed to create floor");
     }
@@ -290,7 +424,7 @@ export async function createFloor(
 
 export async function updateFloor(
     floorId: string,
-    data: { label?: string; order?: number; gcsImageUrl?: string }
+    data: { label?: string; order?: number; gcsImageUrl?: string; cloudinaryPublicId?: string }
 ) {
     if (!mongoose.isValidObjectId(floorId)) {
         return actionError("Invalid floor id");
@@ -308,11 +442,22 @@ export async function updateFloor(
 
     await connectToDatabase();
 
+    let floorUpdated = false;
+
     try {
         await ProjectService.updateFloor(floorId, data);
+        floorUpdated = true;
         revalidatePath('/manage-project');
         return actionSuccess(true);
     } catch (error) {
+        if (!floorUpdated && data.gcsImageUrl) {
+            await deleteCloudinaryAsset({
+                url: data.gcsImageUrl,
+                publicId: data.cloudinaryPublicId,
+                context: `rollback-update-floor:${floorId}`,
+            });
+        }
+
         console.error("Failed to update floor:", error);
         return actionError("Failed to update floor");
     }
@@ -358,11 +503,19 @@ export async function createCommitment(data: Record<string, unknown>) {
         return actionError(access.message);
     }
 
+    const restrictedStatusError = await ensureRestrictedStatusAllowed(context.projectId, data.status);
+    if (restrictedStatusError) {
+        return actionError(restrictedStatusError);
+    }
+
+    const normalizedStatus = typeof data.status === "string" ? data.status.trim() : data.status;
+
     await connectToDatabase();
 
     try {
         const commitment = await CommitmentRepository.create({
             ...data,
+            ...(typeof normalizedStatus === "string" ? { status: normalizedStatus } : {}),
             projectId: context.projectId,
             requesterId: access.userId,
         });
@@ -389,10 +542,20 @@ export async function updateCommitment(commitmentId: string, data: Record<string
         return actionError(access.message);
     }
 
+    const restrictedStatusError = await ensureRestrictedStatusAllowed(projectId, data.status);
+    if (restrictedStatusError) {
+        return actionError(restrictedStatusError);
+    }
+
+    const normalizedStatus = typeof data.status === "string" ? data.status.trim() : data.status;
+
     await connectToDatabase();
 
     try {
-        const commitment = await CommitmentRepository.update(commitmentId, data);
+        const commitment = await CommitmentRepository.update(commitmentId, {
+            ...data,
+            ...(typeof normalizedStatus === "string" ? { status: normalizedStatus } : {}),
+        });
         revalidatePath('/manage-project');
         return actionSuccess(commitment);
     } catch (error) {

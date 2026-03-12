@@ -2,22 +2,22 @@
 
 import React from "react";
 import type { ICommitmentData } from "@/app/detail/[floorId]/DetailPlanView";
+import { fromLocalDateKey, toLocalDateKey, toUtcDateKey } from "@/lib/dateOnly";
 
 interface ICalendarBarProps {
     commitments: ICommitmentData[];
-    highlightedDay: string | null;
-    onDayClick: (dateStr: string) => void;
+    highlightedDayKey: string | null;
+    onDayClick: (dayKey: string) => void;
     onCommitmentClick?: (commitment: ICommitmentData) => void;
 }
 
 const DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
-function getWeekDays(weekStartStr: string): Date[] {
-    const start = new Date(weekStartStr);
+function getWeekDayKeys(weekStart: Date): string[] {
     return Array.from({ length: 7 }, (_, i) => {
-        const d = new Date(start);
-        d.setDate(start.getDate() + i);
-        return d;
+        const date = new Date(weekStart);
+        date.setDate(weekStart.getDate() + i);
+        return toLocalDateKey(date);
     });
 }
 
@@ -25,7 +25,7 @@ function isSameDay(a: Date, b: Date): boolean {
     return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 }
 
-export const CalendarBar = ({ commitments, highlightedDay, onDayClick, onCommitmentClick }: ICalendarBarProps) => {
+export const CalendarBar = ({ commitments, highlightedDayKey, onDayClick, onCommitmentClick }: ICalendarBarProps) => {
     // Dynamically calculate the current week's Monday
     const today = new Date();
     const dayOfWeek = today.getDay();
@@ -34,39 +34,34 @@ export const CalendarBar = ({ commitments, highlightedDay, onDayClick, onCommitm
     currentWeekStart.setDate(diff);
     currentWeekStart.setHours(0, 0, 0, 0);
 
-    const currentWeekDays = getWeekDays(currentWeekStart.toISOString());
+    const currentWeekDays = getWeekDayKeys(currentWeekStart);
     const nextWeekStart = new Date(currentWeekStart);
     nextWeekStart.setDate(nextWeekStart.getDate() + 7);
-    const nextWeekDays = getWeekDays(nextWeekStart.toISOString());
+    const nextWeekDays = getWeekDayKeys(nextWeekStart);
 
-    const highlightDate = highlightedDay ? new Date(highlightedDay) : null;
-
-    // Get activities for a given day
-    const getActivitiesForDay = (day: Date): ICommitmentData[] => {
+    const getActivitiesForDay = (dayKey: string): ICommitmentData[] => {
         return commitments.filter(c => {
-            if (c.targetDate && isSameDay(new Date(c.targetDate), day)) {
-                return true;
-            }
-            return false;
+            return toUtcDateKey(c.targetDate) === dayKey;
         }).slice(0, 4); // Max 4 dots
     };
 
-    const renderWeek = (days: Date[], label: string, isNext: boolean) => (
+    const renderWeek = (days: string[], label: string, isNext: boolean) => (
         <div className={`flex flex-col h-full border border-neutral-200 dark:border-neutral-800 rounded-md overflow-hidden bg-neutral-50 dark:bg-neutral-800 ${isNext ? "opacity-70" : ""}`}>
             <div className="bg-neutral-100 dark:bg-neutral-700 px-3 py-1 border-b border-neutral-200 dark:border-neutral-800 text-xs font-semibold text-neutral-700 dark:text-neutral-300 text-center uppercase tracking-wider">
                 {label}
             </div>
             <div className="grid grid-cols-7 h-full text-center divide-x divide-neutral-200 dark:divide-neutral-800">
-                {days.map((day, i) => {
+                {days.map((dayKey, i) => {
+                    const day = fromLocalDateKey(dayKey);
                     const isToday = isSameDay(day, today);
-                    const isHighlighted = highlightDate && isSameDay(day, highlightDate);
+                    const isHighlighted = highlightedDayKey === dayKey;
                     const isWeekend = i >= 5;
-                    const activities = getActivitiesForDay(day);
+                    const activities = getActivitiesForDay(dayKey);
 
                     return (
                         <div
-                            key={day.toISOString()}
-                            onClick={() => onDayClick(day.toISOString())}
+                            key={dayKey}
+                            onClick={() => onDayClick(dayKey)}
                             className={`p-1 flex flex-col items-center gap-1 cursor-pointer transition-all relative
                                 ${isHighlighted ? "bg-primary/10 ring-2 ring-primary ring-inset" : ""}
                                 ${isToday && !isHighlighted ? "bg-primary/5 border-b-2 border-primary" : ""}
@@ -93,7 +88,7 @@ export const CalendarBar = ({ commitments, highlightedDay, onDayClick, onCommitm
                                                 if (onCommitmentClick) {
                                                     onCommitmentClick(activity);
                                                 } else {
-                                                    onDayClick(day.toISOString());
+                                                    onDayClick(dayKey);
                                                 }
                                             }}
                                         />
@@ -109,7 +104,7 @@ export const CalendarBar = ({ commitments, highlightedDay, onDayClick, onCommitm
 
     return (
         <div className="bg-white dark:bg-neutral-900 border-b border-neutral-200 dark:border-neutral-800 p-4 shrink-0 shadow-sm z-10 w-full overflow-x-auto">
-            <div className="grid grid-cols-2 gap-4 h-24 min-w-[600px]">
+            <div className="grid grid-cols-2 gap-4 h-24 min-w-150">
                 {renderWeek(currentWeekDays, "Current Week", false)}
                 {renderWeek(nextWeekDays, "Next Week", true)}
             </div>

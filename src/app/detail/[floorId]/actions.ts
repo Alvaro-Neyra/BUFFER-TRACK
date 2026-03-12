@@ -8,9 +8,12 @@ import { FloorRepository } from "@/repositories/floor.repository";
 import { BuildingRepository } from "@/repositories/building.repository";
 import { SpecialtyRepository } from "@/repositories/specialty.repository";
 import { roleRepository } from "@/repositories/role.repository";
+import { isRestrictedStatus } from "@/lib/projectFeatures";
+import { ProjectService } from "@/services/project.service";
 import mongoose from "mongoose";
 import { revalidatePath } from "next/cache";
 import { actionSuccess, actionError } from "@/lib/apiResponse";
+import { parseDateOnlyInput } from "@/lib/dateOnly";
 
 type TProjectAccessResult =
     | { ok: true; userId: string; isManager: boolean }
@@ -64,6 +67,19 @@ async function requireActiveProjectAccess(projectId: string): Promise<TProjectAc
         userId: session.user.id,
         isManager: membershipIsManager,
     };
+}
+
+async function ensureRestrictedStatusAllowed(projectId: string, status: unknown): Promise<string | null> {
+    if (typeof status !== "string" || !isRestrictedStatus(status)) {
+        return null;
+    }
+
+    const redListEnabled = await ProjectService.isRedListEnabled(projectId);
+    if (!redListEnabled) {
+        return "Restricted status is unavailable because Red List is disabled for this project";
+    }
+
+    return null;
 }
 
 // ─── Data Fetching ───────────────────────────────────────────────
@@ -197,6 +213,12 @@ export async function createCommitment(data: {
         return actionError(access.message);
     }
 
+    const normalizedStatus = typeof data.status === "string" ? data.status.trim() : undefined;
+    const restrictedStatusError = await ensureRestrictedStatusAllowed(projectId, normalizedStatus);
+    if (restrictedStatusError) {
+        return actionError(restrictedStatusError);
+    }
+
     await connectToDatabase();
 
     const [building, floor, specialty, assignedUser] = await Promise.all([
@@ -222,15 +244,19 @@ export async function createCommitment(data: {
         return actionError("Assigned user is not active in this project");
     }
 
-    // Calculate weekStart (Monday of the target week)
+    // Calculate weekStart (Monday of the target week) in UTC for date-only consistency.
+    let parsedTargetDate: Date | undefined;
     let weekStart: Date | undefined;
     if (data.targetDate) {
-        const target = new Date(data.targetDate);
-        const day = target.getDay();
-        const diff = target.getDate() - day + (day === 0 ? -6 : 1);
-        weekStart = new Date(target);
-        weekStart.setDate(diff);
-        weekStart.setHours(0, 0, 0, 0);
+        const target = parseDateOnlyInput(data.targetDate);
+        if (!target) {
+            return actionError("Invalid target date");
+        }
+
+        parsedTargetDate = target;
+        const day = target.getUTCDay();
+        const diff = target.getUTCDate() - day + (day === 0 ? -6 : 1);
+        weekStart = new Date(Date.UTC(target.getUTCFullYear(), target.getUTCMonth(), diff));
     }
 
     try {
@@ -242,11 +268,11 @@ export async function createCommitment(data: {
             requesterId: new mongoose.Types.ObjectId(access.userId),
             assignedTo: assignedToId ? new mongoose.Types.ObjectId(assignedToId) : undefined,
             description: data.description,
-            status: data.status || "Request",
+            status: normalizedStatus || "Request",
             coordinates: data.coordinates,
             dates: {
                 requestDate: new Date(),
-                targetDate: data.targetDate ? new Date(data.targetDate) : undefined,
+                targetDate: parsedTargetDate,
             },
             weekStart,
         });
@@ -280,8 +306,18 @@ export async function updateCommitmentStatus(commitmentId: string, status: strin
         return actionError("Forbidden");
     }
 
+    const normalizedStatus = status.trim();
+    if (!normalizedStatus) {
+        return actionError("Status is required");
+    }
+
+    const restrictedStatusError = await ensureRestrictedStatusAllowed(existing.projectId.toString(), normalizedStatus);
+    if (restrictedStatusError) {
+        return actionError(restrictedStatusError);
+    }
+
     try {
-        await CommitmentRepository.updateStatus(commitmentId, status);
+        await CommitmentRepository.updateStatus(commitmentId, normalizedStatus);
         revalidatePath(`/detail/${floorId}`);
         return actionSuccess(true);
     } catch (error) {
@@ -305,9 +341,6 @@ export async function updateCommitmentDetails(
 
     await connectToDatabase();
 
-    const updatePayload: Record<string, unknown> = {};
-    if (data.status) updatePayload.status = data.status;
-
     const existing = await CommitmentRepository.findById(commitmentId);
     if (!existing) return actionError("Not found");
     if (existing.floorId.toString() !== floorId) {
@@ -322,6 +355,21 @@ export async function updateCommitmentDetails(
         return actionError("Forbidden");
     }
 
+    const updatePayload: Record<string, unknown> = {};
+    if (typeof data.status === "string") {
+        const normalizedStatus = data.status.trim();
+        if (!normalizedStatus) {
+            return actionError("Status is required");
+        }
+
+        const restrictedStatusError = await ensureRestrictedStatusAllowed(existing.projectId.toString(), normalizedStatus);
+        if (restrictedStatusError) {
+            return actionError(restrictedStatusError);
+        }
+
+        updatePayload.status = normalizedStatus;
+    }
+
     const nextDates: {
         requestDate?: Date;
         startDate?: Date;
@@ -332,10 +380,26 @@ export async function updateCommitmentDetails(
     };
 
     if (data.startDate !== undefined) {
-        nextDates.startDate = data.startDate ? new Date(data.startDate) : undefined;
+        if (!data.startDate) {
+            nextDates.startDate = undefined;
+        } else {
+            const parsedStartDate = parseDateOnlyInput(data.startDate);
+            if (!parsedStartDate) {
+                return actionError("Invalid start date");
+            }
+            nextDates.startDate = parsedStartDate;
+        }
     }
     if (data.targetDate !== undefined) {
-        nextDates.targetDate = data.targetDate ? new Date(data.targetDate) : undefined;
+        if (!data.targetDate) {
+            nextDates.targetDate = undefined;
+        } else {
+            const parsedTargetDate = parseDateOnlyInput(data.targetDate);
+            if (!parsedTargetDate) {
+                return actionError("Invalid end date");
+            }
+            nextDates.targetDate = parsedTargetDate;
+        }
     }
     updatePayload.dates = nextDates;
 

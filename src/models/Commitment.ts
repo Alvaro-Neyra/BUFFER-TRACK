@@ -72,4 +72,9 @@ const CommitmentSchema: Schema = new Schema(
     { timestamps: true }
 );
 
+// Project-scoped search indexes for quick header autocomplete on activities.
+CommitmentSchema.index({ projectId: 1, name: 1 });
+CommitmentSchema.index({ projectId: 1, customId: 1 });
+CommitmentSchema.index({ projectId: 1, status: 1 });
+
 export default mongoose.models.Commitment || mongoose.model<ICommitment>('Commitment', CommitmentSchema);

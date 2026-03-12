@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useTransition } from "react";
+import React, { useEffect, useMemo, useState, useTransition } from "react";
 import type { IUserDTO, ISpecialtyDTO, IStatusDTO, IRoleDTO } from "@/types/models";
 import { deleteCommitment } from "../actions";
 import { ManageStatusesModal } from "@/components/organisms/ManageStatusesModal";
@@ -10,17 +10,20 @@ import { EditActivityModal } from "@/components/organisms/EditActivityModal";
 import { ConfirmModal } from "@/components/organisms/ConfirmModal";
 import { AlertModal } from "@/components/organisms/AlertModal";
 import type { ISerializedCommitment } from "../ManageProjectView";
+import { formatDateOnlyUTC } from "@/lib/dateOnly";
+import { isRestrictedStatus } from "@/lib/projectFeatures";
 
 interface IActivitiesTabProps {
     commitments: ISerializedCommitment[];
     specialties: ISpecialtyDTO[];
     statuses: IStatusDTO[];
+    redListEnabled: boolean;
     roles: IRoleDTO[];
     users: IUserDTO[];
     currentProjectId: string;
 }
 
-export function ActivitiesTab({ commitments, specialties, statuses, roles, users, currentProjectId }: IActivitiesTabProps) {
+export function ActivitiesTab({ commitments, specialties, statuses, redListEnabled, roles, users, currentProjectId }: IActivitiesTabProps) {
     const [, startTransition] = useTransition();
     const [filterStatus, setFilterStatus] = useState<string>("all");
     const [filterSpecialty, setFilterSpecialty] = useState<string>("all");
@@ -34,6 +37,18 @@ export function ActivitiesTab({ commitments, specialties, statuses, roles, users
     const [deletingCommitmentId, setDeletingCommitmentId] = useState<string | null>(null);
     const [alert, setAlert] = useState<{ isOpen: boolean; title: string; message: string; type: 'success' | 'error' } | null>(null);
 
+    const selectableStatuses = useMemo(() => (
+        redListEnabled
+            ? statuses
+            : statuses.filter((status) => !isRestrictedStatus(status.name))
+    ), [redListEnabled, statuses]);
+
+    useEffect(() => {
+        if (filterStatus !== "all" && !selectableStatuses.some((status) => status.name === filterStatus)) {
+            setFilterStatus("all");
+        }
+    }, [filterStatus, selectableStatuses]);
+
     const filteredCommitments = commitments.filter((c) => {
         if (filterStatus !== "all" && c.status !== filterStatus) return false;
         if (filterSpecialty !== "all" && c.specialtyName !== filterSpecialty) return false;
@@ -42,6 +57,9 @@ export function ActivitiesTab({ commitments, specialties, statuses, roles, users
             return (
                 c.buildingName.toLowerCase().includes(q) ||
                 c.floorLabel.toLowerCase().includes(q) ||
+                c.name.toLowerCase().includes(q) ||
+                (c.customId || "").toLowerCase().includes(q) ||
+                (c.location || "").toLowerCase().includes(q) ||
                 c.assignedToName.toLowerCase().includes(q) ||
                 c.specialtyName.toLowerCase().includes(q) ||
                 c.description.toLowerCase().includes(q)
@@ -83,7 +101,7 @@ export function ActivitiesTab({ commitments, specialties, statuses, roles, users
                 <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}
                     className="px-3 py-2 border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 rounded-lg text-sm text-neutral-900 dark:text-neutral-100 focus:ring-primary focus:border-primary shadow-sm">
                     <option value="all">All Statuses</option>
-                    {statuses.map((s) => (<option key={s._id} value={s.name}>{s.name}</option>))}
+                    {selectableStatuses.map((s) => (<option key={s._id} value={s.name}>{s.name}</option>))}
                 </select>
                 <select value={filterSpecialty} onChange={(e) => setFilterSpecialty(e.target.value)}
                     className="px-3 py-2 border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 rounded-lg text-sm text-neutral-900 dark:text-neutral-100 focus:ring-primary focus:border-primary shadow-sm">
@@ -126,15 +144,18 @@ export function ActivitiesTab({ commitments, specialties, statuses, roles, users
                     </div>
                 ) : (
                     <div className="overflow-x-auto">
-                        <table className="w-full text-left text-sm text-neutral-600 dark:text-neutral-300 min-w-[900px]">
+                        <table className="w-full text-left text-sm text-neutral-600 dark:text-neutral-300 min-w-300">
                             <thead className="bg-neutral-50 dark:bg-neutral-800/50 text-xs uppercase font-bold text-neutral-500 border-b border-neutral-200 dark:border-neutral-800">
                                 <tr>
                                     <th className="px-5 py-3.5">Building</th>
                                     <th className="px-5 py-3.5">Floor</th>
+                                    <th className="px-5 py-3.5">Title</th>
+                                    <th className="px-5 py-3.5">Custom ID</th>
+                                    <th className="px-5 py-3.5">Location</th>
                                     <th className="px-5 py-3.5">Specialty</th>
                                     <th className="px-5 py-3.5">Assigned To</th>
                                     <th className="px-5 py-3.5">Status</th>
-                                    <th className="px-5 py-3.5">Target Date</th>
+                                    <th className="px-5 py-3.5">Dates</th>
                                     <th className="px-5 py-3.5 text-right">Actions</th>
                                 </tr>
                             </thead>
@@ -148,6 +169,15 @@ export function ActivitiesTab({ commitments, specialties, statuses, roles, users
                                                 <span className="text-xs text-neutral-400 ml-1.5">{c.buildingCode}</span>
                                             </td>
                                             <td className="px-5 py-3.5">{c.floorLabel}</td>
+                                            <td className="px-5 py-3.5">
+                                                <span className="font-semibold text-neutral-900 dark:text-white">{c.name || "—"}</span>
+                                            </td>
+                                            <td className="px-5 py-3.5">
+                                                <span className="font-mono text-xs text-neutral-500 dark:text-neutral-400">{c.customId || "—"}</span>
+                                            </td>
+                                            <td className="px-5 py-3.5 max-w-56">
+                                                <span className="block truncate" title={c.location || ""}>{c.location || "—"}</span>
+                                            </td>
                                             <td className="px-5 py-3.5">
                                                 <div className="flex items-center gap-2">
                                                     <span className="size-2.5 rounded-full shrink-0" style={{ backgroundColor: c.specialtyColor }} />
@@ -163,11 +193,14 @@ export function ActivitiesTab({ commitments, specialties, statuses, roles, users
                                                     </span>
                                                 </div>
                                             </td>
-                                            <td className="px-5 py-3.5 text-neutral-500">
-                                                {c.targetDate ? new Date(c.targetDate).toLocaleDateString() : "—"}
+                                            <td className="px-5 py-3.5 text-[11px] leading-tight">
+                                                <div className="flex flex-col">
+                                                    <span className="text-neutral-400">S: {formatDateOnlyUTC(c.startDate ?? c.dates?.startDate ?? null)}</span>
+                                                    <span className="text-neutral-900 dark:text-neutral-100 font-bold">T: {formatDateOnlyUTC(c.targetDate ?? c.dates?.targetDate ?? null)}</span>
+                                                </div>
                                             </td>
                                             <td className="px-5 py-3.5 text-right">
-                                                <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                <div className="flex justify-end gap-1">
                                                     <button onClick={() => setEditingCommitment(c)} className="p-1.5 text-neutral-400 hover:text-primary transition-colors">
                                                         <span className="material-symbols-outlined text-lg">edit</span>
                                                     </button>
@@ -212,7 +245,7 @@ export function ActivitiesTab({ commitments, specialties, statuses, roles, users
                 <EditActivityModal
                     commitment={editingCommitment}
                     specialties={specialties}
-                    statuses={statuses}
+                    statuses={selectableStatuses}
                     users={users}
                     onClose={() => setEditingCommitment(null)}
                 />

@@ -5,6 +5,7 @@ import { updateCommitment } from "@/app/manage-project/actions";
 import { ISpecialtyDTO, IStatusDTO, IUserDTO } from "@/types/models";
 import type { ISerializedCommitment } from "@/app/manage-project/ManageProjectView";
 import { AlertModal } from "./AlertModal";
+import { toDateInputValue, toUtcMidnightIso } from "@/lib/dateOnly";
 
 interface IEditActivityModalProps {
     commitment: ISerializedCommitment;
@@ -22,15 +23,15 @@ export const EditActivityModal = ({
     users,
 }: IEditActivityModalProps) => {
     const [isPending, startTransition] = useTransition();
+    const [title, setTitle] = useState(commitment.name || "");
+    const [customId, setCustomId] = useState(commitment.customId || "");
+    const [location, setLocation] = useState(commitment.location || "");
     const [description, setDescription] = useState(commitment.description || "");
     const [specialtyId, setSpecialtyId] = useState(commitment.specialtyId || "");
     const [assignedTo, setAssignedTo] = useState(commitment.assignedToId || "");
     const [status, setStatus] = useState(commitment.status || "");
-    const [targetDate, setTargetDate] = useState(
-        commitment.targetDate
-            ? new Date(commitment.targetDate).toISOString().split("T")[0]
-            : ""
-    );
+    const [startDate, setStartDate] = useState(toDateInputValue(commitment.startDate ?? commitment.dates?.startDate ?? null));
+    const [targetDate, setTargetDate] = useState(toDateInputValue(commitment.targetDate ?? commitment.dates?.targetDate ?? null));
     
     const [alert, setAlert] = useState<{ isOpen: boolean; title: string; message: string; type: 'success' | 'error' } | null>(null);
 
@@ -40,17 +41,32 @@ export const EditActivityModal = ({
         : users;
 
     const handleSubmit = () => {
-        if (!description || !specialtyId || !status) return;
+        if (!title.trim() || !specialtyId || !status) return;
+
+        if (startDate && targetDate && targetDate < startDate) {
+            setAlert({
+                isOpen: true,
+                title: "Invalid dates",
+                message: "Target Date cannot be before Start Date.",
+                type: 'error',
+            });
+            return;
+        }
 
         startTransition(async () => {
             const res = await updateCommitment(commitment._id, {
+                name: title.trim(),
+                customId: customId.trim() || "",
+                location: location.trim() || "",
                 specialtyId,
                 assignedTo: assignedTo || null,
-                description,
+                description: description.trim(),
                 status,
                 dates: {
                     ...(commitment.dates || {}),
-                    targetDate: targetDate ? new Date(targetDate) : null,
+                    // Keep date-only values pinned to UTC midnight to avoid timezone drift.
+                    startDate: startDate ? toUtcMidnightIso(startDate) : null,
+                    targetDate: targetDate ? toUtcMidnightIso(targetDate) : null,
                 }
             });
 
@@ -73,9 +89,40 @@ export const EditActivityModal = ({
                 </div>
 
                 <div className="p-6 overflow-y-auto flex-1 flex flex-col gap-5">
+                    {/* Core Fields */}
+                    <div className="grid grid-cols-2 gap-4">
+                        <div className="col-span-2">
+                            <label className="block text-xs font-bold uppercase tracking-wider text-neutral-600 dark:text-neutral-400 mb-2">Title *</label>
+                            <input
+                                type="text"
+                                value={title}
+                                onChange={(e) => setTitle(e.target.value)}
+                                className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 rounded-lg text-neutral-900 dark:text-white focus:ring-2 focus:ring-primary focus:border-transparent text-sm"
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-xs font-bold uppercase tracking-wider text-neutral-600 dark:text-neutral-400 mb-2">Custom ID</label>
+                            <input
+                                type="text"
+                                value={customId}
+                                onChange={(e) => setCustomId(e.target.value)}
+                                className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 rounded-lg text-neutral-900 dark:text-white focus:ring-2 focus:ring-primary focus:border-transparent text-sm"
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-xs font-bold uppercase tracking-wider text-neutral-600 dark:text-neutral-400 mb-2">Location</label>
+                            <input
+                                type="text"
+                                value={location}
+                                onChange={(e) => setLocation(e.target.value)}
+                                className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 rounded-lg text-neutral-900 dark:text-white focus:ring-2 focus:ring-primary focus:border-transparent text-sm"
+                            />
+                        </div>
+                    </div>
+
                     {/* Description */}
                     <div>
-                        <label className="block text-xs font-bold uppercase tracking-wider text-neutral-600 dark:text-neutral-400 mb-2">Description *</label>
+                        <label className="block text-xs font-bold uppercase tracking-wider text-neutral-600 dark:text-neutral-400 mb-2">Description</label>
                         <input
                             type="text" value={description}
                             onChange={(e) => setDescription(e.target.value)}
@@ -128,14 +175,24 @@ export const EditActivityModal = ({
                         </div>
                     </div>
 
-                    {/* Target Date */}
-                    <div>
-                        <label className="block text-xs font-bold uppercase tracking-wider text-neutral-600 dark:text-neutral-400 mb-2">Target Date</label>
-                        <input
-                            type="date" value={targetDate}
-                            onChange={(e) => setTargetDate(e.target.value)}
-                            className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 rounded-lg text-neutral-900 dark:text-white focus:ring-2 focus:ring-primary focus:border-transparent text-sm"
-                        />
+                    {/* Dates */}
+                    <div className="grid grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-xs font-bold uppercase tracking-wider text-neutral-600 dark:text-neutral-400 mb-2">Start Date</label>
+                            <input
+                                type="date" value={startDate}
+                                onChange={(e) => setStartDate(e.target.value)}
+                                className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 rounded-lg text-neutral-900 dark:text-white focus:ring-2 focus:ring-primary focus:border-transparent text-sm"
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-xs font-bold uppercase tracking-wider text-neutral-600 dark:text-neutral-400 mb-2">Target Date</label>
+                            <input
+                                type="date" value={targetDate}
+                                onChange={(e) => setTargetDate(e.target.value)}
+                                className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 rounded-lg text-neutral-900 dark:text-white focus:ring-2 focus:ring-primary focus:border-transparent text-sm"
+                            />
+                        </div>
                     </div>
                 </div>
 
@@ -145,7 +202,7 @@ export const EditActivityModal = ({
                     </button>
                     <button
                         onClick={handleSubmit}
-                        disabled={isPending || !description || !specialtyId || !status}
+                        disabled={isPending || !title.trim() || !specialtyId || !status}
                         className="px-6 py-2 text-sm font-bold bg-primary hover:bg-primary/90 text-white rounded-lg shadow-sm transition-transform active:scale-95 disabled:opacity-50"
                     >
                         {isPending ? "Saving..." : "Save Changes"}

@@ -14,6 +14,10 @@ export class CommitmentRepository {
         await connectToDatabase();
     }
 
+    private static escapeRegex(input: string): string {
+        return input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }
+
     /** Find commitments matching a generic query filter. */
     static async findByQuery(
         query: Record<string, unknown>,
@@ -107,6 +111,36 @@ export class CommitmentRepository {
             .populate('assignedTo', 'name company')
             .populate('requesterId', 'name')
             .sort({ createdAt: -1 })
+            .lean() as Promise<ICommitment[]>;
+    }
+
+    /** Search activities in a project with populated floor/building metadata for navigation. */
+    static async searchByProject(
+        projectId: string,
+        query: string,
+        limit = 8,
+        visibilityFilter: Record<string, unknown> = {}
+    ): Promise<ICommitment[]> {
+        await this.connect();
+
+        const escapedQuery = this.escapeRegex(query.trim());
+        const pattern = new RegExp(escapedQuery, 'i');
+
+        return Commitment.find({
+            projectId: new mongoose.Types.ObjectId(projectId),
+            ...visibilityFilter,
+            $or: [
+                { name: pattern },
+                { customId: pattern },
+                { location: pattern },
+                { description: pattern },
+            ],
+        })
+            .populate('buildingId', 'name code')
+            .populate('floorId', 'label')
+            .populate('specialtyId', 'name colorHex')
+            .sort({ updatedAt: -1, createdAt: -1 })
+            .limit(limit)
             .lean() as Promise<ICommitment[]>;
     }
 }

@@ -10,6 +10,7 @@ import { statusRepository } from "@/repositories/status.repository";
 import { roleRepository } from "@/repositories/role.repository";
 import { UserRepository } from "@/repositories/user.repository";
 import { ProjectRepository } from "@/repositories/project.repository";
+import { isRedListEnabled } from "@/lib/projectFeatures";
 import { PendingAccessView } from "@/components/organisms/PendingAccessView";
 import { ManageProjectView } from "./ManageProjectView";
 
@@ -199,6 +200,7 @@ export default async function ManageProjectPage({
     // Fetch master plan image from DB
     const project = await ProjectRepository.findById(currentProjectId);
     const masterPlanImageUrl = project?.masterPlanImageUrl || "";
+    const redListEnabled = isRedListEnabled(project);
 
     return (
         <ManageProjectView
@@ -212,6 +214,8 @@ export default async function ManageProjectPage({
             currentProjectId={currentProjectId}
             masterPlanImageUrl={masterPlanImageUrl}
             commitmentCounts={commitmentCounts}
+            redListEnabled={redListEnabled}
+            isGlobalAdmin={isGlobalAdmin}
         />
     );
 }

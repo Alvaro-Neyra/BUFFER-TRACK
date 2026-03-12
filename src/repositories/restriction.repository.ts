@@ -30,14 +30,25 @@ export class RestrictionRepository {
             .populate({ path: 'reportedBy', select: 'firstName lastName companyName' })
             .populate({
                 path: 'commitmentId',
-                select: 'dates status',
+                select: 'name description dates status customId specialtyId assignedTo buildingId floorId',
                 populate: [
-                    { path: 'floorId', select: 'level' },
+                    { path: 'floorId', select: 'label' },
                     { path: 'buildingId', select: 'name code' },
+                    { path: 'specialtyId', select: 'name' },
+                    { path: 'assignedTo', select: 'name company' },
                 ],
             })
             .sort({ createdAt: -1 })
             .lean() as Promise<IRestriction[]>;
+    }
+
+    /** Count active restrictions for a project. */
+    static async countActiveByProject(projectId: string): Promise<number> {
+        await this.connect();
+        return Restriction.countDocuments({
+            projectId: new mongoose.Types.ObjectId(projectId),
+            isActive: true,
+        });
     }
 
     /** Create a new restriction document. */

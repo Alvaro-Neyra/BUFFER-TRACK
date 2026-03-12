@@ -4,6 +4,7 @@ import React, { useTransition, useState } from "react";
 import { useRouter } from "next/navigation";
 import { updateCommitmentStatus, updateCommitmentDetails } from "@/app/detail/[floorId]/actions";
 import type { ICommitmentData, IStatusOption } from "@/app/detail/[floorId]/DetailPlanView";
+import { formatDateOnlyUTC, toDateInputValue, toUtcMidnightIso } from "@/lib/dateOnly";
 
 interface ICommitmentDetailsSidebarProps {
     commitments: ICommitmentData[];
@@ -46,8 +47,8 @@ export const CommitmentDetailsSidebar = ({ commitments, selectedCommitmentId, fl
 
     const handleEditClick = () => {
         setEditForm({
-            startDate: selectedCommitment?.startDate ? new Date(selectedCommitment.startDate).toISOString().split('T')[0] : "",
-            targetDate: selectedCommitment?.targetDate ? new Date(selectedCommitment.targetDate).toISOString().split('T')[0] : "",
+            startDate: toDateInputValue(selectedCommitment?.startDate),
+            targetDate: toDateInputValue(selectedCommitment?.targetDate),
             status: selectedCommitment?.status || "In Progress"
         });
         setIsEditing(true);
@@ -55,10 +56,16 @@ export const CommitmentDetailsSidebar = ({ commitments, selectedCommitmentId, fl
 
     const handleSaveEdit = () => {
         if (!selectedCommitment) return;
+
+        if (editForm.startDate && editForm.targetDate && editForm.targetDate < editForm.startDate) {
+            alert("Target End cannot be before Start Date");
+            return;
+        }
+
         startTransition(async () => {
             const res = await updateCommitmentDetails(selectedCommitment._id, {
-                startDate: editForm.startDate || null,
-                targetDate: editForm.targetDate || null,
+                startDate: editForm.startDate ? toUtcMidnightIso(editForm.startDate) : null,
+                targetDate: editForm.targetDate ? toUtcMidnightIso(editForm.targetDate) : null,
                 status: editForm.status
             }, floorId);
             if (res.success) {
@@ -100,27 +107,55 @@ export const CommitmentDetailsSidebar = ({ commitments, selectedCommitmentId, fl
                                 <div
                                     key={c._id}
                                     onClick={() => onSelectCommitment(c)}
-                                    className="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg shadow-sm group cursor-pointer transition-all hover:border-primary/50 overflow-hidden"
+                                    className="group relative bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-3.5 transition-all duration-200 hover:shadow-md hover:border-primary/40 cursor-pointer overflow-hidden"
                                 >
-                                    <div className="p-3 flex items-start gap-3">
-                                        <div className="size-3 rounded-full mt-1 shrink-0 shadow-sm border border-black/10" style={{ backgroundColor: c.specialtyColor || "#8B5CF6" }} />
-                                        <div className="flex-1 min-w-0">
-                                            <p className="text-sm font-bold text-neutral-900 dark:text-white leading-tight">{c.name || c.description || c.specialtyName}</p>
-                                            <div className="flex flex-wrap gap-1 mt-1.5">
-                                                <span className="px-1.5 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800 text-[10px] font-medium text-neutral-600 dark:text-neutral-400">
-                                                    {c.specialtyName}
-                                                </span>
-                                                {c.assignedToName !== "Unassigned" && (
-                                                    <span className="px-1.5 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800 text-[10px] font-medium text-neutral-600 dark:text-neutral-400 flex items-center gap-1">
-                                                        <span className="material-symbols-outlined text-[10px]">person</span>
-                                                        {c.assignedToName.split(' ')[0]}
+                                    {/* Left Accent Bar */}
+                                    <div
+                                        className="absolute left-0 top-0 bottom-0 w-1 opacity-80 group-hover:opacity-100 transition-opacity"
+                                        style={{ backgroundColor: c.specialtyColor || "#8B5CF6" }}
+                                    />
+
+                                    <div className="flex flex-col gap-2.5">
+                                        <div className="flex justify-between items-start gap-3">
+                                            <div className="flex-1 min-w-0">
+                                                <h4 className="text-sm font-bold text-neutral-900 dark:text-white leading-snug group-hover:text-primary transition-colors line-clamp-2">
+                                                    {c.name || c.description || c.specialtyName}
+                                                </h4>
+                                            </div>
+                                            <span
+                                                className="px-2 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider shrink-0 shadow-sm border border-black/5"
+                                                style={{ backgroundColor: statusStyle.bg, color: statusStyle.color }}
+                                            >
+                                                {statusStyle.label}
+                                            </span>
+                                        </div>
+
+                                        <div className="flex items-center justify-between mt-0.5">
+                                            <div className="flex flex-wrap gap-2">
+                                                <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-neutral-100 dark:bg-neutral-800 border border-neutral-200/50 dark:border-neutral-700/50">
+                                                    <div className="size-1.5 rounded-full" style={{ backgroundColor: c.specialtyColor || "#8B5CF6" }} />
+                                                    <span className="text-[10px] font-semibold text-neutral-600 dark:text-neutral-400 capitalize">
+                                                        {c.specialtyName.toLowerCase()}
                                                     </span>
+                                                </div>
+
+                                                {c.assignedToName !== "Unassigned" && (
+                                                    <div className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-neutral-100 dark:bg-neutral-800 border border-neutral-200/50 dark:border-neutral-700/50">
+                                                        <span className="material-symbols-outlined text-[12px] text-neutral-500">person</span>
+                                                        <span className="text-[10px] font-semibold text-neutral-600 dark:text-neutral-400">
+                                                            {c.assignedToName.split(' ')[0]}
+                                                        </span>
+                                                    </div>
                                                 )}
                                             </div>
+
+                                            {c.targetDate && (
+                                                <div className="flex items-center gap-1 text-[10px] font-medium text-neutral-400 italic">
+                                                    <span className="material-symbols-outlined text-[12px]">calendar_today</span>
+                                                    {formatDateOnlyUTC(c.targetDate, { day: "numeric", month: "short", year: undefined })}
+                                                </div>
+                                            )}
                                         </div>
-                                        <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase shrink-0" style={{ backgroundColor: statusStyle.bg, color: statusStyle.color }}>
-                                            {statusStyle.label}
-                                        </span>
                                     </div>
                                 </div>
                             );
@@ -259,7 +294,7 @@ export const CommitmentDetailsSidebar = ({ commitments, selectedCommitmentId, fl
                                         Start Date
                                     </label>
                                     <div className="text-sm text-neutral-900 dark:text-white">
-                                        {new Date(selectedCommitment.startDate).toLocaleDateString()}
+                                        {formatDateOnlyUTC(selectedCommitment.startDate)}
                                     </div>
                                 </div>
                             )}
@@ -269,7 +304,7 @@ export const CommitmentDetailsSidebar = ({ commitments, selectedCommitmentId, fl
                                 </label>
                                 <div className="text-sm text-neutral-900 dark:text-white">
                                     {selectedCommitment.targetDate
-                                        ? new Date(selectedCommitment.targetDate).toLocaleDateString()
+                                        ? formatDateOnlyUTC(selectedCommitment.targetDate)
                                         : "—"}
                                 </div>
                             </div>
@@ -289,16 +324,6 @@ export const CommitmentDetailsSidebar = ({ commitments, selectedCommitmentId, fl
             <div className="p-6 border-t border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-900 shrink-0 flex flex-col gap-3">
                 {!isEditing ? (
                     <>
-                        {selectedCommitment.status !== "Restricted" && selectedCommitment.status !== "Completed" && (
-                            <button
-                                type="button"
-                                onClick={() => handleStatusChange(selectedCommitment._id, "Restricted")}
-                                disabled={isPending}
-                                className="w-full py-2 px-4 bg-white dark:bg-neutral-800 border border-orange-300 dark:border-orange-700 text-orange-600 rounded-md text-xs font-bold hover:bg-orange-50 dark:hover:bg-orange-900/20 transition-colors disabled:opacity-50 flex items-center justify-center gap-1.5"
-                            >
-                                <span className="text-xs">⚠️</span> Report Restriction
-                            </button>
-                        )}
                         <div className="flex gap-3">
                             <button
                                 type="button"

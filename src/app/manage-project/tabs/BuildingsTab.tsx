@@ -1,9 +1,9 @@
 "use client";
 
-import React, { useState, useTransition, useRef } from "react";
+import React, { useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
-import { createBuilding, updateBuilding, deleteBuilding, createFloor, deleteFloor, updateMasterPlanImage, createCommitment, updateCommitment, deleteCommitment } from "../actions";
+import { createBuilding, updateBuilding, deleteBuilding, createFloor, updateFloor, deleteFloor, updateMasterPlanImage, createCommitment, updateCommitment, deleteCommitment } from "../actions";
 import { compressImage, formatFileSize } from "@/lib/compressImage";
 import dynamic from "next/dynamic";
 
@@ -16,6 +16,8 @@ import type { IPercentPoint } from "@/components/organisms/FreeDrawOverlay";
 import type { IBuildingWithFloors } from "@/services/project.service";
 import type { ISerializedCommitment } from "../ManageProjectView";
 import type { IUserDTO, ISpecialtyDTO, IStatusDTO } from "@/types/models";
+import { toDateInputValue, toUtcMidnightIso } from "@/lib/dateOnly";
+import { isRestrictedStatus } from "@/lib/projectFeatures";
 
 interface IBuildingsTabProps {
     buildings: IBuildingWithFloors[];
@@ -25,15 +27,30 @@ interface IBuildingsTabProps {
     commitments: ISerializedCommitment[];
     specialties: ISpecialtyDTO[];
     statuses: IStatusDTO[];
+    redListEnabled: boolean;
     activeUsers: IUserDTO[];
 }
 
 type TMode = "view" | "placing" | "drawing";
+type TFloorItem = IBuildingWithFloors["floors"][number];
 
-export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, commitmentCounts, commitments, specialties, statuses, activeUsers }: IBuildingsTabProps) {
+interface IUploadedImageResult {
+    url: string;
+    publicId: string;
+}
+
+interface IEditFloorFormState {
+    label: string;
+    order: number;
+    gcsImageUrl: string;
+    cloudinaryPublicId?: string;
+}
+
+export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, commitmentCounts, commitments, specialties, statuses, redListEnabled, activeUsers }: IBuildingsTabProps) {
     const router = useRouter();
     const [isPending, startTransition] = useTransition();
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const editFloorFileInputRef = useRef<HTMLInputElement>(null);
     const masterPlanFileRef = useRef<HTMLInputElement>(null);
 
     // Modes
@@ -48,8 +65,14 @@ export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, 
     const selectedBuildingObj = buildings.find(b => b._id === selectedBuilding);
     const selectedFloorObj = selectedBuildingObj?.floors.find(f => f._id === selectedFloor);
 
+    const selectableStatuses = useMemo(() => (
+        redListEnabled
+            ? statuses
+            : statuses.filter((status) => !isRestrictedStatus(status.name))
+    ), [redListEnabled, statuses]);
+
     // Default status from dynamic list or fallback
-    const defaultStatus = statuses.length > 0 ? statuses[0].name : "Request";
+    const defaultStatus = selectableStatuses.length > 0 ? selectableStatuses[0].name : "Request";
 
     // Build form state
     const [newBuilding, setNewBuilding] = useState({ name: "", code: "", number: 1 });
@@ -77,11 +100,15 @@ export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, 
     const [showAddFloor, setShowAddFloor] = useState<string | null>(null);
     const [newFloor, setNewFloor] = useState({ label: "", order: 1 });
     const [floorImageUrl, setFloorImageUrl] = useState("");
+    const [floorImagePublicId, setFloorImagePublicId] = useState<string | undefined>(undefined);
     const [uploading, setUploading] = useState(false);
+    const [editingFloorId, setEditingFloorId] = useState<string | null>(null);
+    const [editFloorForm, setEditFloorForm] = useState<IEditFloorFormState>({ label: "", order: 1, gcsImageUrl: "" });
+    const [uploadingEditFloor, setUploadingEditFloor] = useState(false);
 
     // ─── Shared: compress + upload helper ────────────────────────
 
-    const compressAndUpload = async (file: File): Promise<string | null> => {
+    const compressAndUpload = async (file: File): Promise<IUploadedImageResult | null> => {
         setCompressionInfo(`Compressing ${formatFileSize(file.size)}...`);
 
         try {
@@ -99,7 +126,15 @@ export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, 
             const json = await res.json();
 
             if (json.success) {
-                return json.data.url as string;
+                const url = json.data?.url;
+                const publicId = json.data?.publicId || json.data?.filename;
+
+                if (typeof url === "string" && typeof publicId === "string") {
+                    return { url, publicId };
+                }
+
+                alert("Upload response missing required metadata");
+                return null;
             } else {
                 alert(json.error || "Upload failed");
                 return null;
@@ -116,9 +151,9 @@ export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, 
     const handleUploadMasterPlan = async (file: File) => {
         setUploadingMasterPlan(true);
         try {
-            const url = await compressAndUpload(file);
-            if (url) {
-                const result = await updateMasterPlanImage(currentProjectId, url);
+            const uploadedImage = await compressAndUpload(file);
+            if (uploadedImage) {
+                const result = await updateMasterPlanImage(currentProjectId, uploadedImage.url, uploadedImage.publicId);
                 if (result.success) router.refresh();
                 else alert(result.error || "Failed to save image");
             }
@@ -134,8 +169,11 @@ export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, 
     const handleUploadImage = async (file: File) => {
         setUploading(true);
         try {
-            const url = await compressAndUpload(file);
-            if (url) setFloorImageUrl(url);
+            const uploadedImage = await compressAndUpload(file);
+            if (uploadedImage) {
+                setFloorImageUrl(uploadedImage.url);
+                setFloorImagePublicId(uploadedImage.publicId);
+            }
         } finally {
             setUploading(false);
             setTimeout(() => setCompressionInfo(null), 8000);
@@ -207,13 +245,87 @@ export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, 
     const handleAddFloor = (buildingId: string) => {
         if (!floorImageUrl) { alert("Please upload a floor plan image first"); return; }
         startTransition(async () => {
-            const res = await createFloor(buildingId, { label: newFloor.label, order: newFloor.order, gcsImageUrl: floorImageUrl });
+            const res = await createFloor(buildingId, {
+                label: newFloor.label,
+                order: newFloor.order,
+                gcsImageUrl: floorImageUrl,
+                cloudinaryPublicId: floorImagePublicId,
+            });
             if (res.success) {
                 setShowAddFloor(null);
                 setNewFloor({ label: "", order: 1 });
                 setFloorImageUrl("");
+                setFloorImagePublicId(undefined);
+                if (fileInputRef.current) fileInputRef.current.value = "";
                 router.refresh();
             } else alert(res.error || "Failed to create floor");
+        });
+    };
+
+    const resetEditFloorState = () => {
+        setEditingFloorId(null);
+        setEditFloorForm({ label: "", order: 1, gcsImageUrl: "", cloudinaryPublicId: undefined });
+        if (editFloorFileInputRef.current) {
+            editFloorFileInputRef.current.value = "";
+        }
+    };
+
+    const handleStartEditFloor = (floor: TFloorItem) => {
+        setShowAddFloor(null);
+        setEditingFloorId(floor._id);
+        setEditFloorForm({
+            label: floor.label,
+            order: floor.order,
+            gcsImageUrl: floor.gcsImageUrl,
+            cloudinaryPublicId: floor.cloudinaryPublicId,
+        });
+    };
+
+    const handleUploadEditFloorImage = async (file: File) => {
+        setUploadingEditFloor(true);
+        try {
+            const uploadedImage = await compressAndUpload(file);
+            if (uploadedImage) {
+                setEditFloorForm((prev) => ({
+                    ...prev,
+                    gcsImageUrl: uploadedImage.url,
+                    cloudinaryPublicId: uploadedImage.publicId,
+                }));
+            }
+        } finally {
+            setUploadingEditFloor(false);
+            setTimeout(() => setCompressionInfo(null), 8000);
+        }
+    };
+
+    const handleEditFloor = (floorId: string) => {
+        if (!editFloorForm.gcsImageUrl) {
+            alert("Please upload a floor plan image first");
+            return;
+        }
+
+        startTransition(async () => {
+            const currentFloor = selected?.floors.find((floor) => floor._id === floorId);
+            const hasImageUpdate = Boolean(currentFloor && currentFloor.gcsImageUrl !== editFloorForm.gcsImageUrl);
+
+            const payload: { label?: string; order?: number; gcsImageUrl?: string; cloudinaryPublicId?: string } = {
+                label: editFloorForm.label,
+                order: editFloorForm.order,
+            };
+
+            if (hasImageUpdate) {
+                payload.gcsImageUrl = editFloorForm.gcsImageUrl;
+                payload.cloudinaryPublicId = editFloorForm.cloudinaryPublicId;
+            }
+
+            const res = await updateFloor(floorId, payload);
+
+            if (res.success) {
+                resetEditFloorState();
+                router.refresh();
+            } else {
+                alert(res.error || "Failed to update floor");
+            }
         });
     };
 
@@ -229,8 +341,8 @@ export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, 
                 location: newActivity.location,
                 description: newActivity.description,
                 dates: {
-                    startDate: newActivity.startDate ? new Date(newActivity.startDate).toISOString() : undefined,
-                    targetDate: newActivity.targetDate ? new Date(newActivity.targetDate).toISOString() : undefined,
+                    startDate: newActivity.startDate ? toUtcMidnightIso(newActivity.startDate) : undefined,
+                    targetDate: newActivity.targetDate ? toUtcMidnightIso(newActivity.targetDate) : undefined,
                 },
                 specialtyId: newActivity.specialtyId,
                 assignedTo: newActivity.assignedTo || null,
@@ -242,7 +354,7 @@ export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, 
                 setMode("view");
                 setPendingCoords(null);
                 setPendingPolygon(null);
-                setNewActivity({ name: "", customId: "", location: "", startDate: "", targetDate: "", description: "", specialtyId: "", assignedTo: "", status: "In Progress" });
+                setNewActivity({ name: "", customId: "", location: "", startDate: "", targetDate: "", description: "", specialtyId: "", assignedTo: "", status: defaultStatus });
                 router.refresh();
             } else alert(res.error || "Failed to create activity");
         });
@@ -256,8 +368,8 @@ export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, 
                 location: editActivityForm.location,
                 description: editActivityForm.description,
                 dates: {
-                    startDate: editActivityForm.startDate ? new Date(editActivityForm.startDate).toISOString() : undefined,
-                    targetDate: editActivityForm.targetDate ? new Date(editActivityForm.targetDate).toISOString() : undefined,
+                    startDate: editActivityForm.startDate ? toUtcMidnightIso(editActivityForm.startDate) : undefined,
+                    targetDate: editActivityForm.targetDate ? toUtcMidnightIso(editActivityForm.targetDate) : undefined,
                 },
                 specialtyId: editActivityForm.specialtyId,
                 assignedTo: editActivityForm.assignedTo || null,
@@ -282,7 +394,7 @@ export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, 
     const COLOR_OPTIONS = ["#8B5CF6", "#3B82F6", "#F59E0B", "#10B981", "#EC4899", "#06B6D4", "#EF4444", "#64748B"];
 
     return (
-        <div className="flex flex-col lg:flex-row gap-6 h-full min-h-[600px]">
+        <div className="flex flex-col lg:flex-row gap-6 h-full min-h-150">
             {/* Compression info banner */}
             {compressionInfo && (
                 <div className={`absolute top-2 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-lg shadow-lg text-xs font-semibold border backdrop-blur-sm max-w-md text-center
@@ -391,7 +503,7 @@ export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, 
 
                 {/* No image: Upload prompt */}
                 {selectedFloorObj && !selectedFloorObj.gcsImageUrl ? (
-                    <div className="flex-1 flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 min-h-[400px]">
+                    <div className="flex-1 flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 min-h-100">
                         <span className="material-symbols-outlined text-6xl text-neutral-300 dark:text-neutral-600 mb-4">image_not_supported</span>
                         <p className="text-base font-bold text-neutral-700 dark:text-neutral-300">
                             No floor plan uploaded
@@ -400,7 +512,7 @@ export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, 
                     </div>
                 ) : !masterPlanImageUrl && !selectedFloorObj ? (
                     <div
-                        className="flex-1 flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 hover:border-primary/50 transition-colors cursor-pointer min-h-[400px]"
+                        className="flex-1 flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 hover:border-primary/50 transition-colors cursor-pointer min-h-100"
                         onClick={() => masterPlanFileRef.current?.click()}
                     >
                         <span className="material-symbols-outlined text-6xl text-neutral-300 dark:text-neutral-600 mb-4">map</span>
@@ -413,7 +525,7 @@ export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, 
                 ) : (
                     <>
                         <div
-                            className={`flex-1 relative isolate rounded-xl bg-neutral-100 dark:bg-neutral-800 flex flex-col min-h-[500px] ${(mode === "placing" || mode === "drawing") ? "ring-2 ring-primary ring-offset-2 dark:ring-offset-neutral-900" : ""}`}
+                            className={`flex-1 relative isolate rounded-xl bg-neutral-100 dark:bg-neutral-800 flex flex-col min-h-125 ${(mode === "placing" || mode === "drawing") ? "ring-2 ring-primary ring-offset-2 dark:ring-offset-neutral-900" : ""}`}
                         >
                             <div className="absolute inset-0 z-0">
                                 <InteractivePlanViewer
@@ -430,7 +542,8 @@ export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, 
                                             ...b,
                                             name: b.name,
                                             code: b.code,
-                                            icon: "domain"
+                                            icon: "domain",
+                                            commitmentCount: commitmentCounts[b._id] ?? 0,
                                         }))
                                     }
                                     mode={mode}
@@ -523,7 +636,7 @@ export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, 
                                                 </select>
                                                 <select value={newActivity.status} onChange={e => setNewActivity({ ...newActivity, status: e.target.value })}
                                                     className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-700 rounded-lg text-sm bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:ring-primary focus:border-primary col-span-2">
-                                                    {statuses.map(s => (
+                                                    {selectableStatuses.map(s => (
                                                         <option key={s._id} value={s.name}>{s.name}</option>
                                                     ))}
                                                 </select>
@@ -700,7 +813,14 @@ export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, 
                         <div>
                             <div className="flex items-center justify-between mb-2">
                                 <h4 className="text-sm font-bold text-neutral-700 dark:text-neutral-300">Floors</h4>
-                                <button onClick={() => { setShowAddFloor(selected._id); setNewFloor({ label: "", order: selected.floors.length + 1 }); setFloorImageUrl(""); }}
+                                <button onClick={() => {
+                                    setShowAddFloor(selected._id);
+                                    setNewFloor({ label: "", order: selected.floors.length + 1 });
+                                    setFloorImageUrl("");
+                                    setFloorImagePublicId(undefined);
+                                    if (fileInputRef.current) fileInputRef.current.value = "";
+                                    resetEditFloorState();
+                                }}
                                     className="flex items-center gap-1 px-2.5 py-1 text-primary bg-primary/10 hover:bg-primary/20 rounded-lg text-xs font-bold transition-colors">
                                     <span className="material-symbols-outlined text-[14px]">add</span>
                                     Add Floor
@@ -722,7 +842,11 @@ export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, 
                                         {floorImageUrl ? (
                                             <div className="relative rounded-lg overflow-hidden border border-neutral-200 dark:border-neutral-700 h-24">
                                                 <Image src={floorImageUrl} alt="Preview" fill className="object-contain" unoptimized />
-                                                <button onClick={() => { setFloorImageUrl(""); if (fileInputRef.current) fileInputRef.current.value = ""; }}
+                                                <button onClick={() => {
+                                                    setFloorImageUrl("");
+                                                    setFloorImagePublicId(undefined);
+                                                    if (fileInputRef.current) fileInputRef.current.value = "";
+                                                }}
                                                     className="absolute top-1 right-1 p-0.5 bg-rose-500 text-white rounded-full hover:bg-rose-600">
                                                     <span className="material-symbols-outlined text-[12px]">close</span>
                                                 </button>
@@ -740,7 +864,12 @@ export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, 
                                     <div className="flex gap-2">
                                         <button onClick={() => handleAddFloor(selected._id)} disabled={isPending || !newFloor.label || !floorImageUrl}
                                             className="px-3 py-1.5 bg-primary text-white rounded-lg text-xs font-bold hover:bg-primary/90 disabled:opacity-50">Create</button>
-                                        <button onClick={() => { setShowAddFloor(null); setFloorImageUrl(""); }}
+                                        <button onClick={() => {
+                                            setShowAddFloor(null);
+                                            setFloorImageUrl("");
+                                            setFloorImagePublicId(undefined);
+                                            if (fileInputRef.current) fileInputRef.current.value = "";
+                                        }}
                                             className="px-3 py-1.5 text-neutral-600 hover:bg-neutral-100 rounded-lg text-xs font-medium">Cancel</button>
                                     </div>
                                 </div>
@@ -751,34 +880,118 @@ export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, 
                                 <p className="text-xs text-neutral-500 italic py-3 text-center">No floors yet</p>
                             ) : (
                                 <div className="space-y-1.5">
-                                    {selected.floors.map(floor => (
-                                        <div key={floor._id}
-                                            onClick={() => setSelectedFloor(floor._id)}
-                                            className="flex items-center justify-between bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-lg px-3 py-2.5 group cursor-pointer hover:border-primary/50 transition-all">
-                                            <div className="flex items-center gap-2.5">
-                                                {floor.gcsImageUrl ? (
-                                                    <div className="relative size-7 rounded border border-neutral-200 dark:border-neutral-700 overflow-hidden shrink-0">
-                                                        <Image src={floor.gcsImageUrl} alt={floor.label} fill className="object-cover" unoptimized />
+                                    {selected.floors.map((floor) => {
+                                        const isEditingFloor = editingFloorId === floor._id;
+
+                                        if (isEditingFloor) {
+                                            return (
+                                                <div key={floor._id} className="bg-white dark:bg-neutral-900 border border-primary/20 rounded-lg p-3">
+                                                    <div className="space-y-4">
+                                                        <div className="grid grid-cols-2 gap-3 pb-3 border-b border-neutral-100 dark:border-neutral-800">
+                                                            <div className="space-y-1">
+                                                                <label className="block text-[10px] font-bold text-neutral-500 uppercase tracking-wider ml-1">Floor Label</label>
+                                                                <input type="text" placeholder="e.g. Floor 1" value={editFloorForm.label}
+                                                                    onChange={(e) => setEditFloorForm({ ...editFloorForm, label: e.target.value })}
+                                                                    className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-700 rounded-lg text-sm bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all outline-none" />
+                                                            </div>
+                                                            <div className="space-y-1">
+                                                                <label className="block text-[10px] font-bold text-neutral-500 uppercase tracking-wider ml-1">Order</label>
+                                                                <input type="number" placeholder="Order" value={editFloorForm.order} min={1}
+                                                                    onChange={(e) => setEditFloorForm({ ...editFloorForm, order: parseInt(e.target.value) || 1 })}
+                                                                    className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-700 rounded-lg text-sm bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all outline-none" />
+                                                            </div>
+                                                        </div>
+
+                                                        <div className="space-y-2">
+                                                            <label className="block text-[10px] font-bold text-neutral-500 uppercase tracking-wider ml-1">Floor Plan Image</label>
+                                                            {editFloorForm.gcsImageUrl ? (
+                                                                <div className="group relative rounded-xl overflow-hidden border-2 border-neutral-100 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-950 aspect-video transition-all hover:border-primary/30">
+                                                                    <Image src={editFloorForm.gcsImageUrl} alt={`Preview for ${floor.label}`} fill className="object-contain p-2" unoptimized />
+                                                                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                                                                        <button onClick={() => editFloorFileInputRef.current?.click()}
+                                                                            type="button"
+                                                                            className="px-3 py-1.5 bg-white text-black rounded-lg text-xs font-bold shadow-xl hover:scale-105 transition-transform flex items-center gap-1.5">
+                                                                            <span className="material-symbols-outlined text-[16px]">image</span>
+                                                                            Change Image
+                                                                        </button>
+                                                                    </div>
+                                                                </div>
+                                                            ) : (
+                                                                <div className="border-2 border-dashed border-neutral-300 dark:border-neutral-700 rounded-xl p-6 text-center hover:border-primary hover:bg-primary/5 transition-all cursor-pointer group"
+                                                                    onClick={() => editFloorFileInputRef.current?.click()}>
+                                                                    <div className="size-10 rounded-full bg-neutral-100 dark:bg-neutral-800 flex items-center justify-center mx-auto mb-2 group-hover:bg-primary/10 transition-colors">
+                                                                        <span className="material-symbols-outlined text-2xl text-neutral-400 group-hover:text-primary">cloud_upload</span>
+                                                                    </div>
+                                                                    <p className="text-sm font-bold text-neutral-700 dark:text-neutral-300">{uploadingEditFloor ? "Uploading..." : "Click to upload plan"}</p>
+                                                                    <p className="text-[10px] text-neutral-500 mt-1">PNG, JPG or WEBP up to 10MB</p>
+                                                                </div>
+                                                            )}
+
+                                                            <input ref={editFloorFileInputRef} type="file" accept="image/jpeg,image/png,image/webp" className="hidden"
+                                                                onChange={(e) => {
+                                                                    const f = e.target.files?.[0];
+                                                                    if (f) handleUploadEditFloorImage(f);
+                                                                }} />
+                                                            
+                                                            {editFloorForm.gcsImageUrl && (
+                                                                <div className="flex items-center gap-2 px-1">
+                                                                    <span className="material-symbols-outlined text-[14px] text-emerald-500">check_circle</span>
+                                                                    <span className="text-[10px] font-medium text-neutral-500">Image uploaded successfully</span>
+                                                                </div>
+                                                            )}
+                                                        </div>
+
+                                                        <div className="flex gap-2 pt-2 border-t border-neutral-100 dark:border-neutral-800">
+                                                            <button
+                                                                onClick={() => handleEditFloor(floor._id)}
+                                                                disabled={isPending || uploadingEditFloor || !editFloorForm.label || !editFloorForm.gcsImageUrl}
+                                                                className="flex-1 px-4 py-2 bg-primary text-white rounded-lg text-sm font-bold shadow-sm shadow-primary/20 hover:bg-primary/90 disabled:opacity-50 disabled:grayscale transition-all active:scale-[0.98]"
+                                                            >
+                                                                {isPending ? "Saving..." : "Save Changes"}
+                                                            </button>
+                                                            <button onClick={resetEditFloorState}
+                                                                className="px-4 py-2 text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800 rounded-lg text-sm font-bold transition-colors">
+                                                                Cancel
+                                                            </button>
+                                                        </div>
                                                     </div>
-                                                ) : (
-                                                    <div className="relative size-7 rounded border border-neutral-200 dark:border-neutral-700 overflow-hidden shrink-0 flex items-center justify-center bg-neutral-100 dark:bg-neutral-800">
-                                                        <span className="material-symbols-outlined text-[14px] text-neutral-400">image_not_supported</span>
+                                                </div>
+                                            );
+                                        }
+
+                                        return (
+                                            <div key={floor._id}
+                                                onClick={() => setSelectedFloor(floor._id)}
+                                                className="flex items-center justify-between bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-lg px-3 py-2.5 group cursor-pointer hover:border-primary/50 transition-all">
+                                                <div className="flex items-center gap-2.5">
+                                                    {floor.gcsImageUrl ? (
+                                                        <div className="relative size-7 rounded border border-neutral-200 dark:border-neutral-700 overflow-hidden shrink-0">
+                                                            <Image src={floor.gcsImageUrl} alt={floor.label} fill className="object-cover" unoptimized />
+                                                        </div>
+                                                    ) : (
+                                                        <div className="relative size-7 rounded border border-neutral-200 dark:border-neutral-700 overflow-hidden shrink-0 flex items-center justify-center bg-neutral-100 dark:bg-neutral-800">
+                                                            <span className="material-symbols-outlined text-[14px] text-neutral-400">image_not_supported</span>
+                                                        </div>
+                                                    )}
+                                                    <div>
+                                                        <p className="text-sm font-semibold text-neutral-900 dark:text-white group-hover:text-primary transition-colors">{floor.label}</p>
+                                                        <p className="text-[10px] text-neutral-500">Level {floor.order}</p>
                                                     </div>
-                                                )}
-                                                <div>
-                                                    <p className="text-sm font-semibold text-neutral-900 dark:text-white group-hover:text-primary transition-colors">{floor.label}</p>
-                                                    <p className="text-[10px] text-neutral-500">Level {floor.order}</p>
+                                                </div>
+                                                <div className="flex items-center gap-1">
+                                                    <button onClick={(e) => { e.stopPropagation(); handleStartEditFloor(floor); }}
+                                                        className="p-1 text-neutral-400 hover:text-primary hover:bg-primary/10 rounded transition-colors opacity-0 group-hover:opacity-100" title="Edit Floor">
+                                                        <span className="material-symbols-outlined text-[14px]">edit</span>
+                                                    </button>
+                                                    <button onClick={(e) => { e.stopPropagation(); handleDeleteFloor(floor._id); }}
+                                                        className="p-1 text-neutral-400 hover:text-rose-500 hover:bg-rose-50 rounded transition-colors opacity-0 group-hover:opacity-100" title="Delete Floor">
+                                                        <span className="material-symbols-outlined text-[14px]">delete</span>
+                                                    </button>
+                                                    <span className="material-symbols-outlined text-neutral-400 group-hover:text-primary text-[18px]">chevron_right</span>
                                                 </div>
                                             </div>
-                                            <div className="flex items-center gap-1">
-                                                <button onClick={(e) => { e.stopPropagation(); handleDeleteFloor(floor._id); }}
-                                                    className="p-1 text-neutral-400 hover:text-rose-500 hover:bg-rose-50 rounded transition-colors opacity-0 group-hover:opacity-100" title="Delete Floor">
-                                                    <span className="material-symbols-outlined text-[14px]">delete</span>
-                                                </button>
-                                                <span className="material-symbols-outlined text-neutral-400 group-hover:text-primary text-[18px]">chevron_right</span>
-                                            </div>
-                                        </div>
-                                    ))}
+                                        );
+                                    })}
                                 </div>
                             )}
                         </div>
@@ -859,7 +1072,7 @@ export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, 
                                                     </select>
                                                     <select value={editActivityForm.status} onChange={e => setEditActivityForm({ ...editActivityForm, status: e.target.value })}
                                                         className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-700 rounded-lg text-sm bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 col-span-2">
-                                                        {statuses.map(s => (
+                                                        {selectableStatuses.map(s => (
                                                             <option key={s._id} value={s.name}>{s.name}</option>
                                                         ))}
                                                     </select>
@@ -878,19 +1091,20 @@ export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, 
                                                     <div>
                                                         <p className="text-sm font-bold text-neutral-900 dark:text-white leading-tight">{activity.name}</p>
                                                         {activity.description && <p className="text-xs text-neutral-500 line-clamp-1 mt-0.5">{activity.description}</p>}
-                                                        <div className="flex flex-wrap gap-1 mt-1.5">
-                                                            <span className="px-1.5 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800 text-[10px] font-medium text-neutral-600 dark:text-neutral-400">
+                                                        <div className="flex flex-wrap gap-1.5 mt-2">
+                                                            <span className="inline-flex items-center justify-center px-1.5 py-1 rounded bg-neutral-100 dark:bg-neutral-800 text-[10px] font-bold text-neutral-600 dark:text-neutral-400 leading-none border border-neutral-200/50 dark:border-neutral-700/50">
                                                                 {activity.specialtyName}
                                                             </span>
                                                             {activity.assignedToId && activeUsers.find(u => u._id === activity.assignedToId) && (
-                                                                <span className="px-1.5 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800 text-[10px] font-medium text-neutral-600 dark:text-neutral-400 flex items-center gap-1">
-                                                                    <span className="material-symbols-outlined text-[10px]">person</span>
+                                                                <span className="inline-flex items-center justify-center px-1.5 py-1 rounded bg-neutral-100 dark:bg-neutral-800 text-[10px] font-bold text-neutral-600 dark:text-neutral-400 gap-1 leading-none border border-neutral-200/50 dark:border-neutral-700/50">
+                                                                    <span className="material-symbols-outlined text-[11px] leading-none">person</span>
                                                                     {activeUsers.find(u => u._id === activity.assignedToId)?.name.split(' ')[0]}
                                                                 </span>
                                                             )}
-                                                            <span className="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-tight" style={{ 
-                                                                backgroundColor: `${getStatusColor(activity.status)}20`, // 20 hex = ~12% opacity
-                                                                color: getStatusColor(activity.status)
+                                                            <span className="inline-flex items-center justify-center px-1.5 py-1 rounded text-[10px] font-black uppercase tracking-wider leading-none border" style={{ 
+                                                                backgroundColor: `${getStatusColor(activity.status)}15`,
+                                                                color: getStatusColor(activity.status),
+                                                                borderColor: `${getStatusColor(activity.status)}30`
                                                             }}>
                                                                 {activity.status}
                                                             </span>
@@ -905,8 +1119,8 @@ export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, 
                                                             name: activity.name,
                                                             customId: activity.customId || "",
                                                             location: activity.location || "",
-                                                            startDate: activity.dates?.startDate ? new Date(activity.dates.startDate).toISOString().split('T')[0] : "",
-                                                            targetDate: activity.dates?.targetDate ? new Date(activity.dates.targetDate).toISOString().split('T')[0] : "",
+                                                            startDate: toDateInputValue(activity.dates?.startDate),
+                                                            targetDate: toDateInputValue(activity.dates?.targetDate),
                                                             description: activity.description || "",
                                                             specialtyId: activity.specialtyId,
                                                             assignedTo: activity.assignedToId || "",

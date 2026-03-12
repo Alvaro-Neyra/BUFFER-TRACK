@@ -2,15 +2,68 @@
 // Floor Plan Image Upload API
 // Pattern: Thin Route Handler
 // Why: Handles multipart form data for floor plan image uploads.
-//      Saves files to public/uploads/floors/ with unique names.
+//      Uploads compressed files to Cloudinary while enforcing
+//      non-adaptive delivery URLs (no auto format/quality/DPR transforms).
 // ------------------------------------------------------------------
 
 import { NextResponse } from 'next/server';
-import { writeFile, mkdir } from 'fs/promises';
-import path from 'path';
+import { v2 as cloudinary, type UploadApiResponse } from 'cloudinary';
 import { auth } from '@/lib/auth';
+import { configureCloudinary } from '@/lib/cloudinary';
 import { roleRepository } from '@/repositories/role.repository';
 import mongoose from 'mongoose';
+
+export const runtime = 'nodejs';
+
+const CLOUDINARY_ADAPTIVE_TOKEN_REGEX = /(f_auto|q_auto|dpr_auto|w_auto|h_auto|g_auto|c_(?:fill|fit|scale|thumb|pad|crop|limit))/i;
+
+function uploadImageToCloudinary(fileBuffer: Buffer, projectId: string): Promise<UploadApiResponse> {
+    const baseFolder = process.env.CLOUDINARY_UPLOAD_FOLDER?.trim() || 'buffertrack/floors';
+    const folder = `${baseFolder}/${projectId}`;
+
+    return new Promise((resolve, reject) => {
+        const stream = cloudinary.uploader.upload_stream(
+            {
+                folder,
+                resource_type: 'image',
+                overwrite: false,
+                unique_filename: true,
+                use_filename: false,
+            },
+            (error, result) => {
+                if (error || !result) {
+                    reject(error ?? new Error('Cloudinary upload failed'));
+                    return;
+                }
+                resolve(result);
+            }
+        );
+
+        stream.end(fileBuffer);
+    });
+}
+
+function buildOriginalCloudinaryUrl(uploadResult: UploadApiResponse): string {
+    return cloudinary.url(uploadResult.public_id, {
+        secure: true,
+        resource_type: 'image',
+        type: 'upload',
+        version: uploadResult.version,
+        format: uploadResult.format,
+    });
+}
+
+function ensureNonAdaptiveDeliveryUrl(url: string): string {
+    if (CLOUDINARY_ADAPTIVE_TOKEN_REGEX.test(url)) {
+        throw new Error('Adaptive Cloudinary transformations are not allowed for floor plan delivery URLs');
+    }
+
+    if (!/\/image\/upload\/v\d+\//.test(url)) {
+        throw new Error('Invalid Cloudinary delivery URL format');
+    }
+
+    return url;
+}
 
 export async function POST(req: Request) {
     try {
@@ -65,26 +118,24 @@ export async function POST(req: Request) {
             );
         }
 
-        // Create upload directory if it doesn't exist
-        const uploadDir = path.join(process.cwd(), 'public', 'uploads', 'floors');
-        await mkdir(uploadDir, { recursive: true });
+        configureCloudinary();
 
-        // Generate unique filename
-        const ext = path.extname(file.name) || '.jpg';
-        const uniqueName = `floor_${Date.now()}_${Math.random().toString(36).substring(2, 8)}${ext}`;
-        const filePath = path.join(uploadDir, uniqueName);
-
-        // Write file to disk
+        // Upload compressed file buffer to Cloudinary
         const bytes = await file.arrayBuffer();
         const buffer = Buffer.from(bytes);
-        await writeFile(filePath, buffer);
+        const uploadResult = await uploadImageToCloudinary(buffer, projectId);
 
-        // Return the public URL
-        const publicUrl = `/uploads/floors/${uniqueName}`;
+        // Always persist canonical delivery URL without adaptive transformations.
+        const publicUrl = ensureNonAdaptiveDeliveryUrl(buildOriginalCloudinaryUrl(uploadResult));
 
         return NextResponse.json({
             success: true,
-            data: { url: publicUrl, filename: uniqueName },
+            data: {
+                url: publicUrl,
+                publicId: uploadResult.public_id,
+                // Keep backward compatibility for existing consumers.
+                filename: uploadResult.public_id,
+            },
         });
     } catch (error) {
         console.error('Upload error:', error);

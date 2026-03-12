@@ -40,7 +40,7 @@ npm install
 npm run dev
 
 # Type check only (no emit)
-npm run typecheck
+npx tsc --noEmit
 
 # Lint
 npm run lint
@@ -56,7 +56,7 @@ npx jest --testNamePattern="<test name>"
 npm run build
 ```
 
-> After moving files or changing imports, always run `npm run lint` and `npm run typecheck`
+> After moving files or changing imports, always run `npm run lint` and `npx tsc --noEmit`
 > to ensure ESLint and TypeScript rules still pass.
 
 ---
@@ -72,7 +72,7 @@ npm run build
 | Auth | **NextAuth.js v5** | JWT strategy |
 | Real-time | **Socket.io** | Pin state sync |
 | Plan zoom/pan | **Pixi.js (WebGL)** | Legacy views use @panzoom/panzoom, migrating all to PixiJS for zero-lag |
-| File storage | **Google Cloud Storage** | JPG/WebP 300 DPI floor plans |
+| File storage | **Cloudinary** | Canonical non-adaptive delivery URLs + stored `publicId` for cleanup lifecycle |
 | Validation | **Zod** | All API inputs |
 | Global state | **Zustand** | Client-side only |
 | Testing | **Jest + React Testing Library** | Co-located test files |
@@ -99,7 +99,8 @@ buffertrack/
 │   │   ├── mongodb.ts              # Singleton MongoDB connection
 │   │   ├── auth.ts                 # NextAuth config
 │   │   ├── socket.ts               # Socket.io config
-│   │   └── gcs.ts                  # Google Cloud Storage config
+│   │   ├── cloudinary.ts           # Cloudinary config + asset lifecycle helpers
+│   │   └── dateOnly.ts             # UTC date-only helpers (parse/format/persist)
 │   ├── models/                     # Mongoose models (1 file per model)
 │   ├── repositories/               # Repository Pattern — data access layer
 │   ├── services/                   # Service Layer — business logic
@@ -125,7 +126,7 @@ buffertrack/
 users             → Role, specialty, company, approval status
 projects          → Name, description, configuration
 buildings         → Code, number, X%/Y% coordinates on master plan
-floors            → GCS image URL, order, label, buildingId ref
+floors            → Cloudinary URL + publicId, order, label, buildingId ref
 commitments       → Specialty, requester, assignee, X%/Y% coords, status, dates
 weeklySnapshots   → Frozen weekly PPC data for historical reporting
 restrictions      → Active blockers linked to a commitment
@@ -265,7 +266,7 @@ Solicitud (Request)
 - Integration tests: critical API routes (commitment creation, PPC calculation)
 - File naming: `ComponentName.test.tsx` co-located with source file
 - Mock MongoDB with `mongodb-memory-server`
-- Run before every commit: `npm run lint && npm run typecheck && npm test`
+- Run before every commit: `npm run lint && npx tsc --noEmit && npm test`
 
 ---
 
@@ -285,9 +286,10 @@ Solicitud (Request)
 MONGODB_URI=
 NEXTAUTH_SECRET=
 NEXTAUTH_URL=
-GCS_BUCKET_NAME=
-GCS_PROJECT_ID=
-GCS_SERVICE_ACCOUNT_KEY=
+CLOUDINARY_CLOUD_NAME=
+CLOUDINARY_API_KEY=
+CLOUDINARY_API_SECRET=
+CLOUDINARY_UPLOAD_FOLDER=buffertrack/floors
 NEXT_PUBLIC_SOCKET_URL=
 ```
 
@@ -317,3 +319,16 @@ NEXT_PUBLIC_SOCKET_URL=
 - Prefer **Server Components** — only add `"use client"` when interactivity is required
 - When in doubt about a library API or Next.js behavior, prefer information from
   **MCP tools or connected skills** over this file — they may have more current data
+
+---
+
+## 🧩 Session Continuity Notes
+
+- **Date-only contract (UTC):** Use `src/lib/dateOnly.ts` helpers for all start/target date parse, display and persistence to prevent day-shift bugs.
+- **Date persistence rule:** Persist date-only values as explicit UTC midnight (`YYYY-MM-DDT00:00:00.000Z`).
+- **Master/detail hotspot labels:** In `InteractivePlanViewer`, building hotspots show commitment count; activity hotspots keep name/code/description fallback.
+- **Hotspot color source:** Activity hotspot color should come from `specialtyColor` (not status color) in detail/manage plan mappings.
+- **Activities editing scope:** Edit modal supports title (`name`), `customId`, `location`, description, specialty, assignee, status, start date, and target date.
+- **Activities table visibility:** Activities tab includes visible columns for Title, Custom ID, and Location; search should include those fields.
+- **Cloudinary policy:** Keep canonical non-adaptive URLs for floor/master plans and store `publicId` to support reliable replace/delete cleanup.
+- **AGENTS maintenance:** Keep this continuity section concise (replace stale bullets instead of appending logs) and keep the full file under 500 lines.

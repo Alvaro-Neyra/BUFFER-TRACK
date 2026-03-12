@@ -1,12 +1,14 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { GlobalHeader } from "@/components/organisms/GlobalHeader";
 import { CalendarBar } from "@/components/organisms/CalendarBar";
 import { InteractivePlanViewer } from "@/components/organisms/InteractivePlanViewer";
 import { CommitmentDetailsSidebar } from "@/components/organisms/CommitmentDetailsSidebar";
 import { NewCommitmentModal } from "@/components/organisms/NewCommitmentModal";
 import { getSpecialtyIcon } from "@/lib/getSpecialtyIcon";
+import { toUtcDateKey } from "@/lib/dateOnly";
 
 // ─── Types ───────────────────────────────────────────────────────
 
@@ -81,12 +83,26 @@ export function DetailPlanView({
     users,
     statuses,
 }: IDetailPlanViewProps) {
+    const searchParams = useSearchParams();
     const [showNewModal, setShowNewModal] = useState(false);
     const [newPinCoords, setNewPinCoords] = useState<{ x: number; y: number } | null>(null);
     const [highlightedPinId, setHighlightedPinId] = useState<string | null>(null);
-    const [highlightedDay, setHighlightedDay] = useState<string | null>(null);
+    const [highlightedDayKey, setHighlightedDayKey] = useState<string | null>(null);
     const [mapMode, setMapMode] = useState<"view" | "placing">("view");
     const [focusPulse, setFocusPulse] = useState(0);
+
+    const selectedCommitmentFromQuery = searchParams?.get("commitmentId") || null;
+
+    useEffect(() => {
+        if (!selectedCommitmentFromQuery) return;
+
+        const matchingCommitment = commitments.find((commitment) => commitment._id === selectedCommitmentFromQuery);
+        if (!matchingCommitment) return;
+
+        setHighlightedPinId(matchingCommitment._id);
+        setFocusPulse((pulse) => pulse + 1);
+        setHighlightedDayKey(toUtcDateKey(matchingCommitment.targetDate));
+    }, [commitments, selectedCommitmentFromQuery]);
 
     // Click on plan → open commitment creation modal (only if in placing mode)
     const handleMapClick = (xPercent: number, yPercent: number) => {
@@ -101,29 +117,16 @@ export function DetailPlanView({
     const handlePinClick = (commitment: ICommitmentData) => {
         setHighlightedPinId(commitment._id);
         setFocusPulse(p => p + 1);
-        if (commitment.targetDate) {
-            setHighlightedDay(commitment.targetDate);
-        }
+        setHighlightedDayKey(toUtcDateKey(commitment.targetDate));
     };
 
     // Click on calendar day → highlight corresponding pins
-    const handleDayClick = (dateStr: string) => {
-        setHighlightedDay(dateStr);
-        // Find the first commitment for that day
-        const match = commitments.find(c => {
-            if (!c.targetDate) return false;
-            const cDay = new Date(c.targetDate).toDateString();
-            return cDay === new Date(dateStr).toDateString();
-        });
+    const handleDayClick = (dayKey: string) => {
+        setHighlightedDayKey(dayKey);
+        const match = commitments.find((commitment) => toUtcDateKey(commitment.targetDate) === dayKey);
         if (match) {
             setHighlightedPinId(match._id);
         }
-    };
-
-    // Helper to get dynamic status color
-    const getStatusColor = (statusName: string) => {
-        const found = statuses.find(s => s.name === statusName);
-        return found?.colorHex || "#94a3b8"; // Default slate-400
     };
 
     return (
@@ -135,7 +138,7 @@ export function DetailPlanView({
                     {/* Calendar Bar */}
                     <CalendarBar
                         commitments={commitments}
-                        highlightedDay={highlightedDay}
+                        highlightedDayKey={highlightedDayKey}
                         onDayClick={handleDayClick}
                         onCommitmentClick={handlePinClick}
                     />
@@ -159,7 +162,7 @@ export function DetailPlanView({
                                 _id: c._id,
                                 name: c.name || c.description || c.specialtyName,
                                 coordinates: c.coordinates,
-                                color: getStatusColor(c.status),
+                                color: c.specialtyColor || "#8B5CF6",
                                 icon: getSpecialtyIcon(c.specialtyName),
                             }))}
                             onHotspotSelect={(hotspot: { _id: string }) => {
@@ -185,13 +188,11 @@ export function DetailPlanView({
                     onSelectCommitment={(commitment) => {
                         setHighlightedPinId(commitment._id);
                         setFocusPulse(p => p + 1);
-                        if (commitment.targetDate) {
-                            setHighlightedDay(commitment.targetDate);
-                        }
+                        setHighlightedDayKey(toUtcDateKey(commitment.targetDate));
                     }}
                     onClose={() => {
                         setHighlightedPinId(null);
-                        setHighlightedDay(null);
+                        setHighlightedDayKey(null);
                     }}
                 />
             </main >

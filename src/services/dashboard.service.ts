@@ -10,6 +10,7 @@ import { CommitmentRepository } from '@/repositories/commitment.repository';
 import { RestrictionRepository } from '@/repositories/restriction.repository';
 import { UserRepository } from '@/repositories/user.repository';
 import { statusRepository } from '@/repositories/status.repository';
+import { ProjectService } from '@/services/project.service';
 import mongoose from 'mongoose';
 
 /** Input parameters for the dashboard metrics query. */
@@ -42,6 +43,7 @@ export interface IDashboardMetrics {
         commitmentId: string;
         date: string;
     }>;
+    redListEnabled: boolean;
     isManager: boolean;
 }
 
@@ -53,6 +55,7 @@ export class DashboardService {
      */
     static async getMetrics(params: IDashboardParams): Promise<IDashboardMetrics> {
         const { projectId, weekStart, isManager, userSpecialtyId } = params;
+        const redListEnabled = await ProjectService.isRedListEnabled(projectId);
 
         // Build base query with optional specialty filter
         const matchQuery: Record<string, unknown> = {
@@ -161,22 +164,26 @@ export class DashboardService {
         const allowedCommitments = await CommitmentRepository.findByQuery(matchQuery, '_id buildingId floorId');
         const allowedCommitmentIds = allowedCommitments.map((c) => c._id);
 
-        const activeRestrictions = await RestrictionRepository.findActiveByProject(
-            projectId,
-            allowedCommitmentIds as mongoose.Types.ObjectId[]
-        );
+        let mappedRestrictions: IDashboardMetrics['activeRestrictions'] = [];
 
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const mappedRestrictions = activeRestrictions.map((r: any) => ({
-            id: r._id.toString(),
-            description: r.description,
-            solver: r.solver,
-            reportedBy: r.reportedBy
-                ? `${r.reportedBy.firstName} ${r.reportedBy.lastName} (${r.reportedBy.companyName})`
-                : 'Unknown',
-            commitmentId: r.commitmentId?._id?.toString() || '',
-            date: r.createdAt.toLocaleDateString(),
-        }));
+        if (redListEnabled && allowedCommitmentIds.length > 0) {
+            const activeRestrictions = await RestrictionRepository.findActiveByProject(
+                projectId,
+                allowedCommitmentIds as mongoose.Types.ObjectId[]
+            );
+
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            mappedRestrictions = activeRestrictions.map((r: any) => ({
+                id: r._id.toString(),
+                description: r.description,
+                solver: r.solver,
+                reportedBy: r.reportedBy
+                    ? `${r.reportedBy.firstName} ${r.reportedBy.lastName} (${r.reportedBy.companyName})`
+                    : 'Unknown',
+                commitmentId: r.commitmentId?._id?.toString() || '',
+                date: r.createdAt.toLocaleDateString(),
+            }));
+        }
 
         // 5. Total pins
         const totalPinsCount = await CommitmentRepository.countByQuery(matchQuery);
@@ -191,6 +198,7 @@ export class DashboardService {
             ppcByZone,
             subcontractorLoad,
             activeRestrictions: mappedRestrictions,
+            redListEnabled,
             isManager,
         };
     }

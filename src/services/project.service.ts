@@ -8,6 +8,8 @@ import { ProjectRepository } from '@/repositories/project.repository';
 import { BuildingRepository } from '@/repositories/building.repository';
 import { FloorRepository } from '@/repositories/floor.repository';
 import { CommitmentRepository } from '@/repositories/commitment.repository';
+import { deleteCloudinaryAsset, extractCloudinaryPublicId } from '@/lib/cloudinary';
+import { isRedListEnabled as resolveRedListEnabled } from '@/lib/projectFeatures';
 import mongoose from 'mongoose';
 
 /** Serialized project for frontend components. */
@@ -43,7 +45,21 @@ export interface IBuildingWithFloors {
         label: string;
         order: number;
         gcsImageUrl: string;
+        cloudinaryPublicId?: string;
     }>;
+}
+
+function normalizeOptionalString(value: unknown): string | undefined {
+    if (typeof value !== 'string') {
+        return undefined;
+    }
+
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function resolveCloudinaryPublicId(imageUrl: string, cloudinaryPublicId?: string): string | undefined {
+    return normalizeOptionalString(cloudinaryPublicId) ?? extractCloudinaryPublicId(imageUrl) ?? undefined;
 }
 
 function serializeBuildingForMasterPlan(b: Record<string, unknown>): ISerializedBuilding {
@@ -90,6 +106,15 @@ function serializeBuildingWithFloors(b: Record<string, unknown>): IBuildingWithF
 }
 
 export class ProjectService {
+    /**
+     * Resolve whether Red List is enabled for a specific project.
+     * Defaults to true for backward compatibility with legacy projects.
+     */
+    static async isRedListEnabled(projectId: string): Promise<boolean> {
+        const project = await ProjectRepository.findById(projectId);
+        return resolveRedListEnabled(project);
+    }
+
     /**
      * Get the list of projects a user has access to.
      */
@@ -141,6 +166,7 @@ export class ProjectService {
                 label: String(f.label),
                 order: Number(f.order),
                 gcsImageUrl: String(f.gcsImageUrl),
+                cloudinaryPublicId: normalizeOptionalString(f.cloudinaryPublicId),
             }));
             result.push(serialized);
         }
@@ -184,12 +210,24 @@ export class ProjectService {
      * Delete a building and cascade to its floors and commitments.
      */
     static async deleteBuilding(buildingId: string): Promise<void> {
+        const floors = await FloorRepository.findByBuildingId(buildingId);
+
         // Delete associated commitments
         await CommitmentRepository.deleteByQuery({ buildingId: new mongoose.Types.ObjectId(buildingId) });
         // Delete associated floors
         await FloorRepository.deleteByBuildingId(buildingId);
         // Delete the building itself
         await BuildingRepository.deleteById(buildingId);
+
+        await Promise.all(
+            floors.map((floor) =>
+                deleteCloudinaryAsset({
+                    url: floor.gcsImageUrl,
+                    publicId: floor.cloudinaryPublicId,
+                    context: `delete-building-floor:${buildingId}`,
+                })
+            )
+        );
     }
 
     /**
@@ -197,11 +235,16 @@ export class ProjectService {
      */
     static async createFloor(
         buildingId: string,
-        data: { label: string; order: number; gcsImageUrl: string }
-    ): Promise<{ _id: string; label: string; order: number; gcsImageUrl: string }> {
+        data: { label: string; order: number; gcsImageUrl: string; cloudinaryPublicId?: string }
+    ): Promise<{ _id: string; label: string; order: number; gcsImageUrl: string; cloudinaryPublicId?: string }> {
+        const cloudinaryPublicId = resolveCloudinaryPublicId(data.gcsImageUrl, data.cloudinaryPublicId);
+
         const floor = await FloorRepository.create({
             buildingId: new mongoose.Types.ObjectId(buildingId),
-            ...data,
+            label: data.label,
+            order: data.order,
+            gcsImageUrl: data.gcsImageUrl,
+            ...(cloudinaryPublicId ? { cloudinaryPublicId } : {}),
         });
 
         return {
@@ -209,6 +252,7 @@ export class ProjectService {
             label: floor.label,
             order: floor.order,
             gcsImageUrl: floor.gcsImageUrl,
+            cloudinaryPublicId: normalizeOptionalString(floor.cloudinaryPublicId),
         };
     }
 
@@ -217,16 +261,69 @@ export class ProjectService {
      */
     static async updateFloor(
         floorId: string,
-        data: { label?: string; order?: number; gcsImageUrl?: string }
+        data: { label?: string; order?: number; gcsImageUrl?: string; cloudinaryPublicId?: string }
     ): Promise<void> {
-        await FloorRepository.updateById(floorId, data);
+        const existingFloor = await FloorRepository.findById(floorId);
+        if (!existingFloor) {
+            throw new Error('Floor not found');
+        }
+
+        const updatePayload: Record<string, unknown> = {};
+
+        if (typeof data.label === 'string') {
+            updatePayload.label = data.label;
+        }
+
+        if (typeof data.order === 'number') {
+            updatePayload.order = data.order;
+        }
+
+        const nextImageUrl = normalizeOptionalString(data.gcsImageUrl);
+        const hasImageUpdate = Boolean(nextImageUrl && nextImageUrl !== existingFloor.gcsImageUrl);
+
+        if (hasImageUpdate && nextImageUrl) {
+            updatePayload.gcsImageUrl = nextImageUrl;
+
+            const nextPublicId = resolveCloudinaryPublicId(nextImageUrl, data.cloudinaryPublicId);
+            updatePayload.cloudinaryPublicId = nextPublicId ?? null;
+        } else {
+            const nextPublicId = normalizeOptionalString(data.cloudinaryPublicId);
+            if (nextPublicId && nextPublicId !== existingFloor.cloudinaryPublicId) {
+                updatePayload.cloudinaryPublicId = nextPublicId;
+            }
+        }
+
+        if (Object.keys(updatePayload).length === 0) {
+            return;
+        }
+
+        await FloorRepository.updateById(floorId, updatePayload);
+
+        if (hasImageUpdate) {
+            await deleteCloudinaryAsset({
+                url: existingFloor.gcsImageUrl,
+                publicId: existingFloor.cloudinaryPublicId,
+                context: `replace-floor-image:${floorId}`,
+            });
+        }
     }
 
     /**
      * Delete a floor and its associated commitments.
      */
     static async deleteFloor(floorId: string): Promise<void> {
+        const floor = await FloorRepository.findById(floorId);
+        if (!floor) {
+            return;
+        }
+
         await CommitmentRepository.deleteByQuery({ floorId: new mongoose.Types.ObjectId(floorId) });
         await FloorRepository.deleteById(floorId);
+
+        await deleteCloudinaryAsset({
+            url: floor.gcsImageUrl,
+            publicId: floor.cloudinaryPublicId,
+            context: `delete-floor:${floorId}`,
+        });
     }
 }

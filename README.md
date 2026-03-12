@@ -20,7 +20,7 @@ BufferTrack is a modern SaaS web application designed for construction project m
 *   **Backend/API**: Next.js API Routes, NextAuth.js v5
 *   **Database**: MongoDB 7+ via Mongoose 8+
 *   **Real-time**: Socket.io
-*   **Storage**: Google Cloud Storage (for high-resolution floor plans)
+*   **Storage**: Cloudinary (for high-resolution floor plans)
 *   **State Management**: Zustand
 *   **Validation**: Zod
 *   **Testing**: Jest + React Testing Library
@@ -32,7 +32,7 @@ BufferTrack is a modern SaaS web application designed for construction project m
 *   Node.js (v18 or higher recommended)
 *   npm (v9 or higher)
 *   MongoDB instance (local or Atlas)
-*   Google Cloud Storage bucket
+*   Cloudinary account (cloud name + API credentials)
 
 ### Installation
 
@@ -53,11 +53,17 @@ BufferTrack is a modern SaaS web application designed for construction project m
     MONGODB_URI=your_mongodb_connection_string
     NEXTAUTH_SECRET=your_nextauth_secret
     NEXTAUTH_URL=http://localhost:3000
-    GCS_BUCKET_NAME=your_gcs_bucket_name
-    GCS_PROJECT_ID=your_gcs_project_id
-    GCS_SERVICE_ACCOUNT_KEY=your_gcs_service_account_credentials_json
+    CLOUDINARY_CLOUD_NAME=your_cloudinary_cloud_name
+    CLOUDINARY_API_KEY=your_cloudinary_api_key
+    CLOUDINARY_API_SECRET=your_cloudinary_api_secret
+    CLOUDINARY_UPLOAD_FOLDER=buffertrack/floors
     NEXT_PUBLIC_SOCKET_URL=http://localhost:3000
     ```
+
+    Floor-plan delivery policy:
+    - Persist and use canonical Cloudinary URLs only (no transformation segments).
+    - Do not append adaptive transformations such as `f_auto`, `q_auto`, `dpr_auto`, `w_auto`, `h_auto`.
+    - Keep client-side compression enabled before upload.
 
 4.  Start the development server:
     ```bash
