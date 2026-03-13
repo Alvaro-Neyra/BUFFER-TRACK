@@ -65,6 +65,7 @@ interface IInteractivePlanViewerProps {
 const POLY_COLORS = ["#8B5CF6", "#3B82F6", "#F59E0B", "#10B981", "#EC4899", "#06B6D4"];
 const MAX_SCALE = 100;
 const PAN_STEP = 50;
+const HOTSPOT_SIZE_BOOST = 3;
 
 function getHotspotLabel(hotspot: IHotspotData): string {
     const isBuildingHotspot = Array.isArray(hotspot.floors);
@@ -510,22 +511,26 @@ export const InteractivePlanViewer = ({
     // At 1x -> 0. At 10x -> ~0.33, at 100x -> ~0.66, at 1000x -> 1.0
     const zoomT = Math.log10(clampedZoom) / 3;
 
-    // Dynamic sizes:
-    // Dot size: from 24px (zoomed out) to 4px (max zoom)
-    const dotSize = 24 - (24 - 4) * zoomT;
+    // Dynamic sizes with a global boost for better hotspot readability.
+    // Dot size: from 24px (zoomed out) to 4px (max zoom), then boosted.
+    const dotSize = (24 - (24 - 4) * zoomT) * HOTSPOT_SIZE_BOOST;
 
-    // Icon wrapper size: from 40px (zoomed out) to 12px (max zoom)
-    const iconWrapperSize = 40 - (40 - 12) * zoomT;
+    // Icon wrapper size: from 40px (zoomed out) to 12px (max zoom), then boosted.
+    const iconWrapperSize = (40 - (40 - 12) * zoomT) * HOTSPOT_SIZE_BOOST;
 
-    // Icon font size: from 28px (zoomed out) to 8px (max zoom)
-    const iconFontSize = 28 - (28 - 8) * zoomT;
+    // Icon font size: from 28px (zoomed out) to 8px (max zoom), then boosted.
+    const iconFontSize = (28 - (28 - 8) * zoomT) * HOTSPOT_SIZE_BOOST;
 
     // Pulse size (for placing): slightly larger than dot
     const pulseSize = dotSize * 1.5;
 
-    // Label font size: from 14px (zoomed out) to 9px (max zoom)
-    const labelFontSize = 14 - (14 - 9) * zoomT;
-    const labelTopOffset = -(iconWrapperSize / 2) - labelFontSize - 4; // Dynamic offset
+    // Tooltip label sizing is proportional to hotspot boost to keep visual balance.
+    const labelScale = Math.max(1, HOTSPOT_SIZE_BOOST);
+    // Base label font: from 14px (zoomed out) to 9px (max zoom), then boosted.
+    const labelFontSize = (14 - (14 - 9) * zoomT) * labelScale;
+    const labelPaddingX = 6 * labelScale;
+    const labelPaddingY = 2 * labelScale;
+    const labelTopOffset = -(iconWrapperSize / 2) - (labelFontSize + labelPaddingY * 2) - 4;
 
     return (
         <>
@@ -590,11 +595,14 @@ export const InteractivePlanViewer = ({
                             />
                             <div
                                 className="absolute left-1/2 -translate-x-1/2 whitespace-nowrap z-50"
-                                style={{ top: `${-(pulseSize / 2) - labelFontSize - 6}px` }}
+                                style={{ top: `${-(pulseSize / 2) - (labelFontSize + labelPaddingY * 2) - 6}px` }}
                             >
                                 <div
-                                    className="bg-neutral-900 text-white font-bold px-1.5 py-0.5 rounded shadow-lg"
-                                    style={{ fontSize: `${Math.max(labelFontSize, 9)}px` }}
+                                    className="bg-neutral-900 text-white font-bold rounded shadow-lg"
+                                    style={{
+                                        fontSize: `${Math.max(labelFontSize, 9)}px`,
+                                        padding: `${Math.max(labelPaddingY, 2)}px ${Math.max(labelPaddingX, 6)}px`,
+                                    }}
                                 >
                                     NEW
                                 </div>
@@ -672,7 +680,7 @@ export const InteractivePlanViewer = ({
                                             fontSize: `${Math.max(iconFontSize * 0.8, 12)}px`,
                                             lineHeight: `${Math.max(iconFontSize * 0.8, 12)}px`,
                                         }}
-                                    >{hotspot.icon || "task_alt"}</span>
+                                    >{hotspot.icon || hotspotIcon}</span>
                                 </div>
                             )}
                             <div
@@ -680,8 +688,11 @@ export const InteractivePlanViewer = ({
                                 style={{ top: `${labelTopOffset}px` }}
                             >
                                 <div
-                                    className="bg-neutral-900 text-white font-bold px-1.5 py-0.5 rounded shadow-lg"
-                                    style={{ fontSize: `${Math.max(labelFontSize, 9)}px` }}
+                                    className="bg-neutral-900 text-white font-bold rounded shadow-lg"
+                                    style={{
+                                        fontSize: `${Math.max(labelFontSize, 9)}px`,
+                                        padding: `${Math.max(labelPaddingY, 2)}px ${Math.max(labelPaddingX, 6)}px`,
+                                    }}
                                 >
                                     {getHotspotLabel(hotspot)}
                                 </div>
