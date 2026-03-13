@@ -5,9 +5,9 @@ import connectToDatabase from "@/lib/mongodb";
 import { getFloorData, getFloorCommitments, getSpecialtiesWithUsers } from "./actions";
 import { statusRepository } from "@/repositories/status.repository";
 import { roleRepository } from "@/repositories/role.repository";
-import { isRestrictedStatus } from "@/lib/projectFeatures";
 import { ProjectService } from "@/services/project.service";
 import { DetailPlanView } from "./DetailPlanView";
+import { isRestrictedStatus } from "@/lib/projectFeatures";
 
 export default async function DetailPlanPage({
     params,
