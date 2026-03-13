@@ -9,9 +9,9 @@ import { RestrictionRepository } from "@/repositories/restriction.repository";
 import { roleRepository } from "@/repositories/role.repository";
 import { statusRepository } from "@/repositories/status.repository";
 import { formatDateOnlyUTC, parseDateOnlyInput } from "@/lib/dateOnly";
-import { isRestrictedStatus } from "@/lib/projectFeatures";
 import { ProjectService } from "@/services/project.service";
 import mongoose from "mongoose";
+import { isRestrictedStatus } from "@/lib/projectFeatures";
 
 interface ICommitmentTimelineUpdate {
     startDate?: string | null;

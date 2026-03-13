@@ -10,9 +10,9 @@ import { statusRepository } from "@/repositories/status.repository";
 import { roleRepository } from "@/repositories/role.repository";
 import { UserRepository } from "@/repositories/user.repository";
 import { ProjectRepository } from "@/repositories/project.repository";
-import { isRedListEnabled } from "@/lib/projectFeatures";
 import { PendingAccessView } from "@/components/organisms/PendingAccessView";
 import { ManageProjectView } from "./ManageProjectView";
+import { isRedListEnabled } from "@/lib/projectFeatures";
 
 export default async function ManageProjectPage({
     searchParams,
