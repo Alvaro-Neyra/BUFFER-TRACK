@@ -11,19 +11,17 @@ import { ConfirmModal } from "@/components/organisms/ConfirmModal";
 import { AlertModal } from "@/components/organisms/AlertModal";
 import type { ISerializedCommitment } from "../ManageProjectView";
 import { formatDateOnlyUTC } from "@/lib/dateOnly";
-import { isRestrictedStatus } from "@/lib/projectFeatures";
 
 interface IActivitiesTabProps {
     commitments: ISerializedCommitment[];
     specialties: ISpecialtyDTO[];
     statuses: IStatusDTO[];
-    redListEnabled: boolean;
     roles: IRoleDTO[];
     users: IUserDTO[];
     currentProjectId: string;
 }
 
-export function ActivitiesTab({ commitments, specialties, statuses, redListEnabled, roles, users, currentProjectId }: IActivitiesTabProps) {
+export function ActivitiesTab({ commitments, specialties, statuses, roles, users, currentProjectId }: IActivitiesTabProps) {
     const [, startTransition] = useTransition();
     const [filterStatus, setFilterStatus] = useState<string>("all");
     const [filterSpecialty, setFilterSpecialty] = useState<string>("all");
@@ -37,11 +35,7 @@ export function ActivitiesTab({ commitments, specialties, statuses, redListEnabl
     const [deletingCommitmentId, setDeletingCommitmentId] = useState<string | null>(null);
     const [alert, setAlert] = useState<{ isOpen: boolean; title: string; message: string; type: 'success' | 'error' } | null>(null);
 
-    const selectableStatuses = useMemo(() => (
-        redListEnabled
-            ? statuses
-            : statuses.filter((status) => !isRestrictedStatus(status.name))
-    ), [redListEnabled, statuses]);
+    const selectableStatuses = useMemo(() => statuses, [statuses]);
 
     useEffect(() => {
         if (filterStatus !== "all" && !selectableStatuses.some((status) => status.name === filterStatus)) {

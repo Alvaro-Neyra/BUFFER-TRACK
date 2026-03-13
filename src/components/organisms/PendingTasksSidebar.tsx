@@ -94,7 +94,7 @@ export const PendingTasksSidebar = ({ commitments, onTaskClick }: IPendingTasksS
                                     {task.status === "In Progress" ? "In progress" :
                                         task.status === "Completed" ? "Completed" :
                                             task.status === "Delayed" ? "Delayed" :
-                                                task.status === "Restricted" ? "Restricted" : task.status}
+                                                task.status}
                                 </span>
                             </div>
                             <div className="flex items-center gap-3 text-xs text-neutral-500 dark:text-neutral-400 pl-10">
