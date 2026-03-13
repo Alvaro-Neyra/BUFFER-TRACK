@@ -18,7 +18,6 @@ const STATUS_RING: Record<string, string> = {
     "In Progress": "ring-amber-400/40",
     Completed: "ring-emerald-400/40",
     Delayed: "ring-rose-400/40",
-    Restricted: "ring-orange-400/40",
 };
 
 export const CommitmentPin = ({
@@ -37,11 +36,6 @@ export const CommitmentPin = ({
             case 'In Progress': return <span className="absolute -top-1 -right-1 size-3.5 bg-amber-400 rounded-full border-2 border-white dark:border-neutral-900" />;
             case 'Completed': return <span className="absolute -top-1 -right-1 size-3.5 bg-emerald-500 rounded-full border-2 border-white dark:border-neutral-900" />;
             case 'Delayed': return <span className="absolute -top-1 -right-1 size-3.5 bg-rose-500 rounded-full border-2 border-white dark:border-neutral-900" />;
-            case 'Restricted': return (
-                <span className="absolute -top-1.5 -right-1.5 size-4 bg-white rounded-full flex items-center justify-center shadow-sm">
-                    <span className="text-[10px] material-symbols-outlined text-orange-500">warning</span>
-                </span>
-            );
             default: return null;
         }
     };

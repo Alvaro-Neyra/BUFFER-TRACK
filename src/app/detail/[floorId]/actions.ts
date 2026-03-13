@@ -8,12 +8,10 @@ import { FloorRepository } from "@/repositories/floor.repository";
 import { BuildingRepository } from "@/repositories/building.repository";
 import { SpecialtyRepository } from "@/repositories/specialty.repository";
 import { roleRepository } from "@/repositories/role.repository";
-import { ProjectService } from "@/services/project.service";
 import mongoose from "mongoose";
 import { revalidatePath } from "next/cache";
 import { actionSuccess, actionError } from "@/lib/apiResponse";
 import { parseDateOnlyInput } from "@/lib/dateOnly";
-import { isRestrictedStatus } from "@/lib/projectFeatures";
 
 type TProjectAccessResult =
     | { ok: true; userId: string; isManager: boolean }
@@ -69,14 +67,13 @@ async function requireActiveProjectAccess(projectId: string): Promise<TProjectAc
     };
 }
 
-async function ensureRestrictedStatusAllowed(projectId: string, status: unknown): Promise<string | null> {
-    if (typeof status !== "string" || !isRestrictedStatus(status)) {
+function validateRestrictedStatusRemoved(status: unknown): string | null {
+    if (typeof status !== "string") {
         return null;
     }
 
-    const redListEnabled = await ProjectService.isRedListEnabled(projectId);
-    if (!redListEnabled) {
-        return "Restricted status is unavailable because Red List is disabled for this project";
+    if (status.trim().toLowerCase() === "restricted") {
+        return "Restricted status is no longer available";
     }
 
     return null;
@@ -214,7 +211,7 @@ export async function createCommitment(data: {
     }
 
     const normalizedStatus = typeof data.status === "string" ? data.status.trim() : undefined;
-    const restrictedStatusError = await ensureRestrictedStatusAllowed(projectId, normalizedStatus);
+    const restrictedStatusError = validateRestrictedStatusRemoved(normalizedStatus);
     if (restrictedStatusError) {
         return actionError(restrictedStatusError);
     }
@@ -311,7 +308,7 @@ export async function updateCommitmentStatus(commitmentId: string, status: strin
         return actionError("Status is required");
     }
 
-    const restrictedStatusError = await ensureRestrictedStatusAllowed(existing.projectId.toString(), normalizedStatus);
+    const restrictedStatusError = validateRestrictedStatusRemoved(normalizedStatus);
     if (restrictedStatusError) {
         return actionError(restrictedStatusError);
     }
@@ -362,7 +359,7 @@ export async function updateCommitmentDetails(
             return actionError("Status is required");
         }
 
-        const restrictedStatusError = await ensureRestrictedStatusAllowed(existing.projectId.toString(), normalizedStatus);
+        const restrictedStatusError = validateRestrictedStatusRemoved(normalizedStatus);
         if (restrictedStatusError) {
             return actionError(restrictedStatusError);
         }

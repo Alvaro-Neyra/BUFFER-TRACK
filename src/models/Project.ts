@@ -9,11 +9,6 @@ export interface IProject extends Document {
     configuration: {
         startWeek: Date;
         endWeek: Date;
-        features?: {
-            redList?: {
-                enabled?: boolean;
-            };
-        };
     };
     isActive: boolean;
     createdAt: Date;
@@ -35,11 +30,6 @@ const ProjectSchema: Schema = new Schema(
         configuration: {
             startWeek: { type: Date, required: true },
             endWeek: { type: Date, required: true },
-            features: {
-                redList: {
-                    enabled: { type: Boolean, default: true },
-                },
-            },
         },
         isActive: { type: Boolean, default: true },
     },

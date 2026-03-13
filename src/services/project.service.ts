@@ -9,7 +9,6 @@ import { BuildingRepository } from '@/repositories/building.repository';
 import { FloorRepository } from '@/repositories/floor.repository';
 import { CommitmentRepository } from '@/repositories/commitment.repository';
 import { deleteCloudinaryAsset, extractCloudinaryPublicId } from '@/lib/cloudinary';
-import { isRedListEnabled as resolveRedListEnabled } from '@/lib/projectFeatures';
 import mongoose from 'mongoose';
 
 /** Serialized project for frontend components. */
@@ -106,15 +105,6 @@ function serializeBuildingWithFloors(b: Record<string, unknown>): IBuildingWithF
 }
 
 export class ProjectService {
-    /**
-     * Resolve whether Red List is enabled for a specific project.
-     * Defaults to true for backward compatibility with legacy projects.
-     */
-    static async isRedListEnabled(projectId: string): Promise<boolean> {
-        const project = await ProjectRepository.findById(projectId);
-        return resolveRedListEnabled(project);
-    }
-
     /**
      * Get the list of projects a user has access to.
      */

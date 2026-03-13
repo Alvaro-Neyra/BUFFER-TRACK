@@ -11,13 +11,11 @@ import { SpecialtyRepository } from "@/repositories/specialty.repository";
 import { statusRepository } from "@/repositories/status.repository";
 import { roleRepository } from "@/repositories/role.repository";
 import { CommitmentRepository } from "@/repositories/commitment.repository";
-import { RestrictionRepository } from "@/repositories/restriction.repository";
 import { UserRepository } from "@/repositories/user.repository";
 import { deleteCloudinaryAsset, extractCloudinaryPublicId } from "@/lib/cloudinary";
 import { revalidatePath } from "next/cache";
 import { actionSuccess, actionError } from "@/lib/apiResponse";
 import mongoose from "mongoose";
-import { isRestrictedStatus } from "@/lib/projectFeatures";
 
 type TAccessResult =
     | { ok: true; userId: string }
@@ -138,14 +136,13 @@ async function requireProjectManagerAccess(projectId: string): Promise<TAccessRe
     return { ok: false, message: "Unauthorized" };
 }
 
-async function ensureRestrictedStatusAllowed(projectId: string, status: unknown): Promise<string | null> {
-    if (typeof status !== "string" || !isRestrictedStatus(status)) {
+function validateRestrictedStatusRemoved(status: unknown): string | null {
+    if (typeof status !== "string") {
         return null;
     }
 
-    const redListEnabled = await ProjectService.isRedListEnabled(projectId);
-    if (!redListEnabled) {
-        return "Restricted status is unavailable because Red List is disabled for this project";
+    if (status.trim().toLowerCase() === "restricted") {
+        return "Restricted status is no longer available";
     }
 
     return null;
@@ -232,63 +229,6 @@ export async function handleUserProjectAccess(
     } catch (error) {
         console.error(`Failed to ${action} user ${userId}:`, error);
         return actionError("Database operation failed");
-    }
-}
-
-export async function setProjectRedListEnabled(projectId: string, enabled: boolean) {
-    if (!mongoose.isValidObjectId(projectId)) {
-        return actionError("Invalid project id");
-    }
-
-    const access = await requireProjectManagerAccess(projectId);
-    if (!access.ok) {
-        return actionError(access.message);
-    }
-
-    const session = await auth();
-    if (!session?.user || session.user.role.toLowerCase() !== "admin") {
-        return actionError("Only global admins can change Red List settings");
-    }
-
-    await connectToDatabase();
-
-    const project = await ProjectRepository.findById(projectId);
-    if (!project) {
-        return actionError("Project not found");
-    }
-
-    if (!enabled) {
-        const [activeRestrictionsCount, restrictedCommitmentsCount] = await Promise.all([
-            RestrictionRepository.countActiveByProject(projectId),
-            CommitmentRepository.countByQuery({
-                projectId: new mongoose.Types.ObjectId(projectId),
-                status: { $regex: /^restricted$/i },
-            }),
-        ]);
-
-        if (activeRestrictionsCount > 0) {
-            return actionError(`Cannot disable Red List while ${activeRestrictionsCount} active restriction(s) remain`);
-        }
-
-        if (restrictedCommitmentsCount > 0) {
-            return actionError(`Cannot disable Red List while ${restrictedCommitmentsCount} commitment(s) are still in Restricted status`);
-        }
-    }
-
-    try {
-        await ProjectRepository.updateById(projectId, {
-            "configuration.features.redList.enabled": enabled,
-        });
-
-        revalidatePath('/manage-project');
-        revalidatePath('/commitments');
-        revalidatePath('/dashboard');
-        revalidatePath('/');
-
-        return actionSuccess({ enabled });
-    } catch (error) {
-        console.error("Failed to update Red List setting:", error);
-        return actionError("Failed to update Red List setting");
     }
 }
 
@@ -503,7 +443,7 @@ export async function createCommitment(data: Record<string, unknown>) {
         return actionError(access.message);
     }
 
-    const restrictedStatusError = await ensureRestrictedStatusAllowed(context.projectId, data.status);
+    const restrictedStatusError = validateRestrictedStatusRemoved(data.status);
     if (restrictedStatusError) {
         return actionError(restrictedStatusError);
     }
@@ -542,7 +482,7 @@ export async function updateCommitment(commitmentId: string, data: Record<string
         return actionError(access.message);
     }
 
-    const restrictedStatusError = await ensureRestrictedStatusAllowed(projectId, data.status);
+    const restrictedStatusError = validateRestrictedStatusRemoved(data.status);
     if (restrictedStatusError) {
         return actionError(restrictedStatusError);
     }
@@ -707,6 +647,10 @@ export async function createStatus(data: { projectId: string; name: string; colo
         return actionError("Invalid project id");
     }
 
+    if (data.name.trim().toLowerCase() === "restricted") {
+        return actionError("Restricted status is no longer available");
+    }
+
     const access = await requireProjectManagerAccess(data.projectId);
     if (!access.ok) {
         return actionError(access.message);
@@ -731,6 +675,10 @@ export async function createStatus(data: { projectId: string; name: string; colo
 export async function updateStatus(id: string, data: { projectId: string; name?: string; colorHex?: string; isPPC?: boolean }) {
     if (!mongoose.isValidObjectId(id) || !mongoose.isValidObjectId(data.projectId)) {
         return actionError("Invalid id");
+    }
+
+    if (typeof data.name === "string" && data.name.trim().toLowerCase() === "restricted") {
+        return actionError("Restricted status is no longer available");
     }
 
     const access = await requireProjectManagerAccess(data.projectId);

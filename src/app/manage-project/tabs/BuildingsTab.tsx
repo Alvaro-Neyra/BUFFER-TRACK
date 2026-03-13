@@ -17,7 +17,6 @@ import type { IBuildingWithFloors } from "@/services/project.service";
 import type { ISerializedCommitment } from "../ManageProjectView";
 import type { IUserDTO, ISpecialtyDTO, IStatusDTO } from "@/types/models";
 import { toDateInputValue, toUtcMidnightIso } from "@/lib/dateOnly";
-import { isRestrictedStatus } from "@/lib/projectFeatures";
 
 interface IBuildingsTabProps {
     buildings: IBuildingWithFloors[];
@@ -27,7 +26,6 @@ interface IBuildingsTabProps {
     commitments: ISerializedCommitment[];
     specialties: ISpecialtyDTO[];
     statuses: IStatusDTO[];
-    redListEnabled: boolean;
     activeUsers: IUserDTO[];
 }
 
@@ -46,7 +44,7 @@ interface IEditFloorFormState {
     cloudinaryPublicId?: string;
 }
 
-export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, commitmentCounts, commitments, specialties, statuses, redListEnabled, activeUsers }: IBuildingsTabProps) {
+export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, commitmentCounts, commitments, specialties, statuses, activeUsers }: IBuildingsTabProps) {
     const router = useRouter();
     const [isPending, startTransition] = useTransition();
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -65,11 +63,7 @@ export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, 
     const selectedBuildingObj = buildings.find(b => b._id === selectedBuilding);
     const selectedFloorObj = selectedBuildingObj?.floors.find(f => f._id === selectedFloor);
 
-    const selectableStatuses = useMemo(() => (
-        redListEnabled
-            ? statuses
-            : statuses.filter((status) => !isRestrictedStatus(status.name))
-    ), [redListEnabled, statuses]);
+    const selectableStatuses = useMemo(() => statuses, [statuses]);
 
     // Default status from dynamic list or fallback
     const defaultStatus = selectableStatuses.length > 0 ? selectableStatuses[0].name : "Request";
