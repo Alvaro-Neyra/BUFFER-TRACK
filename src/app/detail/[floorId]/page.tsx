@@ -5,9 +5,7 @@ import connectToDatabase from "@/lib/mongodb";
 import { getFloorData, getFloorCommitments, getSpecialtiesWithUsers } from "./actions";
 import { statusRepository } from "@/repositories/status.repository";
 import { roleRepository } from "@/repositories/role.repository";
-import { ProjectService } from "@/services/project.service";
 import { DetailPlanView } from "./DetailPlanView";
-import { isRestrictedStatus } from "@/lib/projectFeatures";
 
 export default async function DetailPlanPage({
     params,
@@ -37,16 +35,11 @@ export default async function DetailPlanPage({
     }
 
     // Fetch data in parallel
-    const [commitments, { specialties, users }, statuses, redListEnabled] = await Promise.all([
+    const [commitments, { specialties, users }, statuses] = await Promise.all([
         getFloorCommitments(floorId),
         getSpecialtiesWithUsers(floorData.projectId),
         statusRepository.getAll(),
-        ProjectService.isRedListEnabled(floorData.projectId),
     ]);
-
-    const selectableStatuses = redListEnabled
-        ? statuses
-        : statuses.filter((status) => !isRestrictedStatus(status.name));
 
     const membershipRole = currentMembership?.roleId
         ? await roleRepository.getByIdInProject(currentMembership.roleId, floorData.projectId)
@@ -63,7 +56,7 @@ export default async function DetailPlanPage({
             commitments={filteredCommitments}
             specialties={specialties}
             users={users}
-            statuses={selectableStatuses.map(s => ({ _id: s._id.toString(), name: s.name, colorHex: s.colorHex }))}
+            statuses={statuses.map(s => ({ _id: s._id.toString(), name: s.name, colorHex: s.colorHex }))}
             currentUserId={session.user.id || ""}
         />
     );

@@ -7,10 +7,8 @@
 // ------------------------------------------------------------------
 
 import { CommitmentRepository } from '@/repositories/commitment.repository';
-import { RestrictionRepository } from '@/repositories/restriction.repository';
 import { UserRepository } from '@/repositories/user.repository';
 import { statusRepository } from '@/repositories/status.repository';
-import { ProjectService } from '@/services/project.service';
 import mongoose from 'mongoose';
 
 /** Input parameters for the dashboard metrics query. */
@@ -35,15 +33,6 @@ export interface IDashboardMetrics {
     ppcByZone: any[];
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     subcontractorLoad: any[];
-    activeRestrictions: Array<{
-        id: string;
-        description: string;
-        solver: string;
-        reportedBy: string;
-        commitmentId: string;
-        date: string;
-    }>;
-    redListEnabled: boolean;
     isManager: boolean;
 }
 
@@ -55,7 +44,6 @@ export class DashboardService {
      */
     static async getMetrics(params: IDashboardParams): Promise<IDashboardMetrics> {
         const { projectId, weekStart, isManager, userSpecialtyId } = params;
-        const redListEnabled = await ProjectService.isRedListEnabled(projectId);
 
         // Build base query with optional specialty filter
         const matchQuery: Record<string, unknown> = {
@@ -160,32 +148,7 @@ export class DashboardService {
             };
         });
 
-        // 4. Restrictions (The Red List)
-        const allowedCommitments = await CommitmentRepository.findByQuery(matchQuery, '_id buildingId floorId');
-        const allowedCommitmentIds = allowedCommitments.map((c) => c._id);
-
-        let mappedRestrictions: IDashboardMetrics['activeRestrictions'] = [];
-
-        if (redListEnabled && allowedCommitmentIds.length > 0) {
-            const activeRestrictions = await RestrictionRepository.findActiveByProject(
-                projectId,
-                allowedCommitmentIds as mongoose.Types.ObjectId[]
-            );
-
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            mappedRestrictions = activeRestrictions.map((r: any) => ({
-                id: r._id.toString(),
-                description: r.description,
-                solver: r.solver,
-                reportedBy: r.reportedBy
-                    ? `${r.reportedBy.firstName} ${r.reportedBy.lastName} (${r.reportedBy.companyName})`
-                    : 'Unknown',
-                commitmentId: r.commitmentId?._id?.toString() || '',
-                date: r.createdAt.toLocaleDateString(),
-            }));
-        }
-
-        // 5. Total pins
+        // 4. Total pins
         const totalPinsCount = await CommitmentRepository.countByQuery(matchQuery);
 
         return {
@@ -197,8 +160,6 @@ export class DashboardService {
             ppcBySubcontractor,
             ppcByZone,
             subcontractorLoad,
-            activeRestrictions: mappedRestrictions,
-            redListEnabled,
             isManager,
         };
     }
