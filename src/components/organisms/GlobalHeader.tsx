@@ -412,19 +412,15 @@ export const GlobalHeader = ({
                         <div className="absolute right-0 mt-2 w-48 bg-white dark:bg-neutral-800 rounded-md shadow-lg border border-neutral-200 dark:border-neutral-700 py-1 z-50">
                             {session ? (
                                 <>
-                                    {hasActiveProject && (
-                                        <>
-                                            <Link
-                                                href="/profile"
-                                                onClick={() => setIsProfileOpen(false)}
-                                                className="w-full text-left px-4 py-2 text-sm text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-700 transition-colors flex items-center gap-2"
-                                            >
-                                                <span className="material-symbols-outlined text-[18px]">person</span>
-                                                Edit Profile
-                                            </Link>
-                                            <div className="h-px w-full bg-neutral-200 dark:bg-neutral-700 my-1"></div>
-                                        </>
-                                    )}
+                                    <Link
+                                        href="/profile"
+                                        onClick={() => setIsProfileOpen(false)}
+                                        className="w-full text-left px-4 py-2 text-sm text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-700 transition-colors flex items-center gap-2"
+                                    >
+                                        <span className="material-symbols-outlined text-[18px]">person</span>
+                                        Edit Profile
+                                    </Link>
+                                    <div className="h-px w-full bg-neutral-200 dark:bg-neutral-700 my-1"></div>
                                     <button
                                         onClick={() => signOut({ callbackUrl: '/login' })}
                                         className="w-full text-left px-4 py-2 text-sm text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-900/20 transition-colors flex items-center gap-2"

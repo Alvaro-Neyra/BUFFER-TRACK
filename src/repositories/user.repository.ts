@@ -29,6 +29,41 @@ export class UserRepository {
         return User.findById(id).lean() as Promise<IUser | null>;
     }
 
+    /** Update editable profile fields for a user. */
+    static async updateProfile(
+        userId: string,
+        data: { name: string; company?: string }
+    ): Promise<void> {
+        await this.connect();
+
+        const trimmedCompany = data.company?.trim();
+
+        if (trimmedCompany) {
+            await User.updateOne(
+                { _id: new mongoose.Types.ObjectId(userId) },
+                {
+                    $set: {
+                        name: data.name,
+                        company: trimmedCompany,
+                    },
+                }
+            );
+            return;
+        }
+
+        await User.updateOne(
+            { _id: new mongoose.Types.ObjectId(userId) },
+            {
+                $set: {
+                    name: data.name,
+                },
+                $unset: {
+                    company: "",
+                },
+            }
+        );
+    }
+
     /** Create a new user document. */
     static async create(payload: Record<string, unknown>): Promise<IUser> {
         await this.connect();
