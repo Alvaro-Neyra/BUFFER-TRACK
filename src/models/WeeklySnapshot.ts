@@ -5,8 +5,8 @@ export interface IWeeklySnapshot extends Document {
     weekStart: Date;
     weekEnd: Date;
     globalPPC: number;
-    totalCommitments: number;
-    completedCommitments: number;
+    totalAssignments: number;
+    completedAssignments: number;
     specialtyData: Array<{
         specialtyId: mongoose.Types.ObjectId;
         ppc: number;
@@ -22,15 +22,15 @@ export interface IWeeklySnapshot extends Document {
 // Justification: Required for the PPC Dashboard. 
 // "Cierre de Semana: El sistema debe permitir 'congelar' la semana".
 // Storing historical aggregated PPC here prevents extremely costly aggregations on the fly across
-// thousands of commitments for historical reporting.
+// thousands of assignments for historical reporting.
 const WeeklySnapshotSchema: Schema = new Schema(
     {
         projectId: { type: Schema.Types.ObjectId, ref: 'Project', required: true, index: true },
         weekStart: { type: Date, required: true, index: true },
         weekEnd: { type: Date, required: true },
         globalPPC: { type: Number, required: true },
-        totalCommitments: { type: Number, required: true },
-        completedCommitments: { type: Number, required: true },
+        totalAssignments: { type: Number, required: true },
+        completedAssignments: { type: Number, required: true },
         specialtyData: [
             {
                 specialtyId: { type: Schema.Types.ObjectId, ref: 'Specialty', required: true },

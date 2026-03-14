@@ -3,7 +3,7 @@
 import React from "react";
 import { cn } from "./MasterPlanHotspot";
 
-interface ICommitmentPinProps {
+interface IAssignmentPinProps {
     xPercent: number;
     yPercent: number;
     onClick: () => void;
@@ -20,7 +20,7 @@ const STATUS_RING: Record<string, string> = {
     Delayed: "ring-rose-400/40",
 };
 
-export const CommitmentPin = ({
+export const AssignmentPin = ({
     xPercent,
     yPercent,
     onClick,
@@ -29,7 +29,7 @@ export const CommitmentPin = ({
     isHighlighted = false,
     icon = "location_on",
     bgColor = "bg-primary",
-}: Readonly<ICommitmentPinProps>) => {
+}: Readonly<IAssignmentPinProps>) => {
 
     const getStatusIndicator = () => {
         switch (status) {

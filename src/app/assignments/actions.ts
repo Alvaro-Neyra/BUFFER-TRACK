@@ -4,15 +4,14 @@ import { revalidatePath } from "next/cache";
 import { actionError, actionSuccess } from "@/lib/apiResponse";
 import { auth } from "@/lib/auth";
 import connectToDatabase from "@/lib/mongodb";
-import { CommitmentRepository } from "@/repositories/commitment.repository";
+import { AssignmentRepository } from "@/repositories/assignment.repository";
 import { roleRepository } from "@/repositories/role.repository";
 import { statusRepository } from "@/repositories/status.repository";
 import { formatDateOnlyUTC, parseDateOnlyInput } from "@/lib/dateOnly";
 import mongoose from "mongoose";
 
-interface ICommitmentTimelineUpdate {
-    startDate?: string | null;
-    targetDate?: string | null;
+interface IAssignmentTimelineUpdate {
+    requiredDate?: string | null;
     status?: string;
 }
 
@@ -46,7 +45,7 @@ async function requireActiveMembership(projectId: string) {
     };
 }
 
-export async function getProjectCommitments(projectId: string) {
+export async function getProjectAssignments(projectId: string) {
     const access = await requireActiveMembership(projectId);
     if (!access.ok) throw new Error(access.error);
 
@@ -54,33 +53,29 @@ export async function getProjectCommitments(projectId: string) {
 
     const userSpecialtyId = access.membership.specialtyId;
 
-    // 1. Fetch commitments with populated references
-    const rawCommitments = await CommitmentRepository.findByProjectPopulated(projectId);
+    // 1. Fetch assignments with populated references
+    const rawAssignments = await AssignmentRepository.findByProjectPopulated(projectId);
 
-    let commitments = rawCommitments;
+    let assignments = rawAssignments;
     if (!access.isManager && userSpecialtyId) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        commitments = rawCommitments.filter((c: any) => c.specialtyId?._id?.toString() === userSpecialtyId);
+        assignments = rawAssignments.filter((c: any) => c.specialtyId?._id?.toString() === userSpecialtyId);
     }
 
-    // Process commitments to plain JS
+    // Process assignments to plain JS
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const processedCommitments = commitments.map((c: any) => ({
+    const processedAssignments = assignments.map((c: any) => ({
         internalId: c._id.toString(),
-        customId: (typeof c.customId === "string" ? c.customId.trim() : "") || "N/A",
-        taskName: c.name,
+        taskName: c.description || "Untitled assignment",
         location: `${c.buildingId?.name || 'Unknown BLD'} • ${c.floorId?.label || 'Unknown Level'}`,
         specialtyName: c.specialtyId?.name || 'Unknown',
         specialtyColor: c.specialtyId?.colorHex || '#ccc',
         status: c.status,
-        startDate: toIsoDate(c.dates?.startDate),
-        targetDate: toIsoDate(c.dates?.targetDate),
-        startDateLabel: formatDateOnlyUTC(c.dates?.startDate, { year: "2-digit", month: "2-digit", day: "2-digit" }, "TBD"),
-        targetDateLabel: formatDateOnlyUTC(c.dates?.targetDate, { year: "2-digit", month: "2-digit", day: "2-digit" }, "TBD"),
-        assignedTo: c.assignedTo ? `${c.assignedTo.name} (${c.assignedTo.company})` : 'Unassigned',
+        requiredDate: toIsoDate(c.requiredDate),
+        requiredDateLabel: formatDateOnlyUTC(c.requiredDate, { year: "2-digit", month: "2-digit", day: "2-digit" }, "TBD"),
     }));
 
-    const statuses = await statusRepository.getAll();
+    const statuses = await statusRepository.getAll(projectId);
     const processedStatuses = statuses.map((status) => ({
             id: status._id.toString(),
             name: status.name,
@@ -88,18 +83,18 @@ export async function getProjectCommitments(projectId: string) {
         }));
 
     return {
-        commitments: processedCommitments,
+        assignments: processedAssignments,
         statuses: processedStatuses,
         isManager: access.isManager,
     };
 }
 
-export async function updateCommitmentTimeline(
-    commitmentId: string,
-    payload: ICommitmentTimelineUpdate,
+export async function updateAssignmentTimeline(
+    assignmentId: string,
+    payload: IAssignmentTimelineUpdate,
     projectId: string
 ) {
-    if (!mongoose.isValidObjectId(commitmentId) || !mongoose.isValidObjectId(projectId)) {
+    if (!mongoose.isValidObjectId(assignmentId) || !mongoose.isValidObjectId(projectId)) {
         return actionError("Invalid request");
     }
 
@@ -110,9 +105,9 @@ export async function updateCommitmentTimeline(
         return actionError(access.error);
     }
 
-    const existing = await CommitmentRepository.findById(commitmentId);
+    const existing = await AssignmentRepository.findById(assignmentId);
     if (!existing) {
-        return actionError("Commitment not found");
+        return actionError("Assignment not found");
     }
 
     if (existing.projectId.toString() !== projectId) {
@@ -133,7 +128,7 @@ export async function updateCommitmentTimeline(
             return actionError("Status is required");
         }
 
-        const validStatus = await statusRepository.findByName(normalizedStatus);
+        const validStatus = await statusRepository.findByName(normalizedStatus, projectId);
         if (!validStatus) {
             return actionError("Invalid status");
         }
@@ -141,48 +136,33 @@ export async function updateCommitmentTimeline(
         updatePayload.status = normalizedStatus;
     }
 
-    const nextDates: {
-        requestDate?: Date;
-        startDate?: Date;
-        targetDate?: Date;
-        actualCompletionDate?: Date;
-    } = {
-        ...(existing.dates || {}),
-    };
-
-    if (payload.startDate !== undefined) {
-        if (!payload.startDate) {
-            delete nextDates.startDate;
-        } else {
-            const parsedStartDate = parseDateOnlyInput(payload.startDate);
-            if (!parsedStartDate) {
-                return actionError("Invalid start date");
-            }
-            nextDates.startDate = parsedStartDate;
+    if (payload.requiredDate !== undefined) {
+        if (!payload.requiredDate) {
+            return actionError("Required date is required");
         }
-    }
 
-    if (payload.targetDate !== undefined) {
-        if (!payload.targetDate) {
-            delete nextDates.targetDate;
-        } else {
-            const parsedTargetDate = parseDateOnlyInput(payload.targetDate);
-            if (!parsedTargetDate) {
-                return actionError("Invalid end date");
-            }
-            nextDates.targetDate = parsedTargetDate;
+        const parsedRequiredDate = parseDateOnlyInput(payload.requiredDate);
+        if (!parsedRequiredDate) {
+            return actionError("Invalid required date");
         }
-    }
 
-    updatePayload.dates = nextDates;
+        const day = parsedRequiredDate.getUTCDay();
+        const diff = parsedRequiredDate.getUTCDate() - day + (day === 0 ? -6 : 1);
+        const weekStart = new Date(
+            Date.UTC(parsedRequiredDate.getUTCFullYear(), parsedRequiredDate.getUTCMonth(), diff)
+        );
+
+        updatePayload.requiredDate = parsedRequiredDate;
+        updatePayload.weekStart = weekStart;
+    }
 
     try {
-        await CommitmentRepository.update(commitmentId, updatePayload);
-        revalidatePath("/commitments");
+        await AssignmentRepository.update(assignmentId, updatePayload);
+        revalidatePath("/assignments");
         revalidatePath("/manage-project");
         return actionSuccess(true);
     } catch (error) {
-        console.error("Failed to update commitment timeline:", error);
-        return actionError("Failed to update commitment");
+        console.error("Failed to update assignment timeline:", error);
+        return actionError("Failed to update assignment");
     }
 }

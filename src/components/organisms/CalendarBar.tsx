@@ -1,14 +1,14 @@
 "use client";
 
 import React from "react";
-import type { ICommitmentData } from "@/app/detail/[floorId]/DetailPlanView";
+import type { IAssignmentData } from "@/app/detail/[floorId]/DetailPlanView";
 import { fromLocalDateKey, toLocalDateKey, toUtcDateKey } from "@/lib/dateOnly";
 
 interface ICalendarBarProps {
-    commitments: ICommitmentData[];
+    assignments: IAssignmentData[];
     highlightedDayKey: string | null;
     onDayClick: (dayKey: string) => void;
-    onCommitmentClick?: (commitment: ICommitmentData) => void;
+    onAssignmentClick?: (assignment: IAssignmentData) => void;
 }
 
 const DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
@@ -25,7 +25,7 @@ function isSameDay(a: Date, b: Date): boolean {
     return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 }
 
-export const CalendarBar = ({ commitments, highlightedDayKey, onDayClick, onCommitmentClick }: ICalendarBarProps) => {
+export const CalendarBar = ({ assignments, highlightedDayKey, onDayClick, onAssignmentClick }: ICalendarBarProps) => {
     // Dynamically calculate the current week's Monday
     const today = new Date();
     const dayOfWeek = today.getDay();
@@ -39,9 +39,9 @@ export const CalendarBar = ({ commitments, highlightedDayKey, onDayClick, onComm
     nextWeekStart.setDate(nextWeekStart.getDate() + 7);
     const nextWeekDays = getWeekDayKeys(nextWeekStart);
 
-    const getActivitiesForDay = (dayKey: string): ICommitmentData[] => {
-        return commitments.filter(c => {
-            return toUtcDateKey(c.targetDate) === dayKey;
+    const getActivitiesForDay = (dayKey: string): IAssignmentData[] => {
+        return assignments.filter(c => {
+            return toUtcDateKey(c.requiredDate) === dayKey;
         }).slice(0, 4); // Max 4 dots
     };
 
@@ -85,8 +85,8 @@ export const CalendarBar = ({ commitments, highlightedDayKey, onDayClick, onComm
                                             title={activity.name || activity.description || "Activity"}
                                             onClick={(e) => {
                                                 e.stopPropagation();
-                                                if (onCommitmentClick) {
-                                                    onCommitmentClick(activity);
+                                                if (onAssignmentClick) {
+                                                    onAssignmentClick(activity);
                                                 } else {
                                                     onDayClick(dayKey);
                                                 }

@@ -10,6 +10,7 @@ import { BuildingRepository } from '@/repositories/building.repository';
 import { SpecialtyRepository } from '@/repositories/specialty.repository';
 import { UserRepository } from '@/repositories/user.repository';
 import { roleRepository } from '@/repositories/role.repository';
+import { statusRepository } from '@/repositories/status.repository';
 import { ROLES, isManagerRole } from '@/constants/roles';
 import mongoose from 'mongoose';
 import bcrypt from 'bcryptjs';
@@ -45,7 +46,10 @@ export class SeedService {
             });
         }
 
-        // 2. Re-seed buildings (clear old ones first)
+        // 2. Ensure critical default statuses exist in this project (idempotent)
+        await statusRepository.ensureDefaultStatuses(project._id.toString());
+
+        // 3. Re-seed buildings (clear old ones first)
         await BuildingRepository.deleteByProjectId(project._id.toString());
 
         const buildings = [
@@ -60,7 +64,7 @@ export class SeedService {
 
         const insertedBuildings = await BuildingRepository.createMany(buildings);
 
-        // 3. Seed specialties (idempotent — skips existing ones)
+        // 4. Seed specialties (idempotent — skips existing ones)
         const specialtyNames = [
             'HVAC', 'Plumbing', 'Fire Protection', 'GAS', 'LV', 'ELV',
             'Lutron', 'Pools', 'Lifts', 'Drywall Framing', 'Drywall Boarding',
@@ -85,7 +89,7 @@ export class SeedService {
             specialtiesCount += inserted.length;
         }
 
-        // 4. Seed default roles per project (idempotent)
+        // 5. Seed default roles per project (idempotent)
         const existingRoles = await roleRepository.getByProjectId(project._id.toString());
         const existingRoleNames = new Set(existingRoles.map((role) => role.name));
 
@@ -119,7 +123,7 @@ export class SeedService {
             }
         }
 
-        // 5. Seed admin user from environment variables
+        // 6. Seed admin user from environment variables
         const adminEmail = process.env.ADMIN_EMAIL;
         const adminPassword = process.env.ADMIN_PASSWORD;
         let adminEmailCreated: string | null = null;

@@ -5,10 +5,10 @@ import { useSearchParams } from "next/navigation";
 import { GlobalHeader } from "@/components/organisms/GlobalHeader";
 import { CalendarBar } from "@/components/organisms/CalendarBar";
 import { InteractivePlanViewer } from "@/components/organisms/InteractivePlanViewer";
-import { CommitmentDetailsSidebar } from "@/components/organisms/CommitmentDetailsSidebar";
-import { NewCommitmentModal } from "@/components/organisms/NewCommitmentModal";
+import { AssignmentDetailsSidebar } from "@/components/organisms/AssignmentDetailsSidebar";
 import { getSpecialtyIcon } from "@/lib/getSpecialtyIcon";
 import { toUtcDateKey } from "@/lib/dateOnly";
+import { AssignmentCreateSidebar } from "@/components/organisms/AssignmentCreateSidebar";
 
 // ─── Types ───────────────────────────────────────────────────────
 
@@ -23,25 +23,22 @@ export interface IFloorData {
     projectId: string;
 }
 
-export interface ICommitmentData {
+export interface IAssignmentData {
     _id: string;
-    customId?: string;
-    location?: string;
     name: string;
     description: string;
     status: string;
     specialtyName: string;
     specialtyColor: string;
     specialtyId: string;
-    assignedToId: string;
-    assignedToName: string;
-    assignedToCompany: string;
     requesterId: string;
     requesterName: string;
+    acceptedById: string;
+    acceptedByName: string;
+    acceptedAt: string | null;
     coordinates: { xPercent: number; yPercent: number };
-    startDate: string | null;
-    targetDate: string | null;
-    requestDate: string | null;
+    requiredDate: string | null;
+    createdAt: string | null;
     weekStart: string | null;
 }
 
@@ -49,14 +46,6 @@ export interface ISpecialtyOption {
     _id: string;
     name: string;
     colorHex: string;
-}
-
-export interface IUserOption {
-    _id: string;
-    name: string;
-    company: string;
-    role: string;
-    specialtyId: string;
 }
 
 export interface IStatusOption {
@@ -67,9 +56,8 @@ export interface IStatusOption {
 
 interface IDetailPlanViewProps {
     floorData: IFloorData;
-    commitments: ICommitmentData[];
+    assignments: IAssignmentData[];
     specialties: ISpecialtyOption[];
-    users: IUserOption[];
     statuses: IStatusOption[];
     currentUserId: string;
 }
@@ -78,52 +66,59 @@ interface IDetailPlanViewProps {
 
 export function DetailPlanView({
     floorData,
-    commitments,
+    assignments,
     specialties,
-    users,
     statuses,
+    currentUserId,
 }: IDetailPlanViewProps) {
     const searchParams = useSearchParams();
-    const [showNewModal, setShowNewModal] = useState(false);
+    const [isCreatingAssignment, setIsCreatingAssignment] = useState(false);
     const [newPinCoords, setNewPinCoords] = useState<{ x: number; y: number } | null>(null);
     const [highlightedPinId, setHighlightedPinId] = useState<string | null>(null);
     const [highlightedDayKey, setHighlightedDayKey] = useState<string | null>(null);
     const [mapMode, setMapMode] = useState<"view" | "placing">("view");
     const [focusPulse, setFocusPulse] = useState(0);
 
-    const selectedCommitmentFromQuery = searchParams?.get("commitmentId") || null;
+    const selectedAssignmentFromQuery = searchParams?.get("assignmentId") || null;
 
     useEffect(() => {
-        if (!selectedCommitmentFromQuery) return;
+        if (!selectedAssignmentFromQuery) return;
 
-        const matchingCommitment = commitments.find((commitment) => commitment._id === selectedCommitmentFromQuery);
-        if (!matchingCommitment) return;
+        const matchingAssignment = assignments.find((assignment) => assignment._id === selectedAssignmentFromQuery);
+        if (!matchingAssignment) return;
 
-        setHighlightedPinId(matchingCommitment._id);
+        setHighlightedPinId(matchingAssignment._id);
         setFocusPulse((pulse) => pulse + 1);
-        setHighlightedDayKey(toUtcDateKey(matchingCommitment.targetDate));
-    }, [commitments, selectedCommitmentFromQuery]);
+        setHighlightedDayKey(toUtcDateKey(matchingAssignment.requiredDate));
+    }, [assignments, selectedAssignmentFromQuery]);
 
-    // Click on plan → open commitment creation modal (only if in placing mode)
+    const startNewAssignmentFlow = () => {
+        setIsCreatingAssignment(true);
+        setNewPinCoords(null);
+        setHighlightedPinId(null);
+        setHighlightedDayKey(null);
+        setMapMode("placing");
+    };
+
+    // Click on plan while placing mode is active.
     const handleMapClick = (xPercent: number, yPercent: number) => {
         if (mapMode === "placing") {
             setNewPinCoords({ x: xPercent, y: yPercent });
-            setShowNewModal(true);
-            setMapMode("view"); // Reset to view mode after dropping a pin
+            setMapMode("view");
         }
     };
 
     // Click on pin → open sidebar + highlight calendar day
-    const handlePinClick = (commitment: ICommitmentData) => {
-        setHighlightedPinId(commitment._id);
+    const handlePinClick = (assignment: IAssignmentData) => {
+        setHighlightedPinId(assignment._id);
         setFocusPulse(p => p + 1);
-        setHighlightedDayKey(toUtcDateKey(commitment.targetDate));
+        setHighlightedDayKey(toUtcDateKey(assignment.requiredDate));
     };
 
     // Click on calendar day → highlight corresponding pins
     const handleDayClick = (dayKey: string) => {
         setHighlightedDayKey(dayKey);
-        const match = commitments.find((commitment) => toUtcDateKey(commitment.targetDate) === dayKey);
+        const match = assignments.find((assignment) => toUtcDateKey(assignment.requiredDate) === dayKey);
         if (match) {
             setHighlightedPinId(match._id);
         }
@@ -137,10 +132,10 @@ export function DetailPlanView({
                 <div className="flex-1 flex flex-col overflow-hidden relative">
                     {/* Calendar Bar */}
                     <CalendarBar
-                        commitments={commitments}
+                        assignments={assignments}
                         highlightedDayKey={highlightedDayKey}
                         onDayClick={handleDayClick}
-                        onCommitmentClick={handlePinClick}
+                        onAssignmentClick={handlePinClick}
                     />
 
                     {/* Plan Area */}
@@ -151,14 +146,37 @@ export function DetailPlanView({
                                     {floorData.buildingCode} · {floorData.label}
                                 </h1>
                                 <p className="text-xs text-neutral-500 dark:text-neutral-400">
-                                    {commitments.length} commitment{commitments.length !== 1 ? "s" : ""} on this floor
+                                    {assignments.length} assignment{assignments.length !== 1 ? "s" : ""} on this floor
                                 </p>
                             </div>
+
+                            {!isCreatingAssignment ? (
+                                <button
+                                    type="button"
+                                    onClick={startNewAssignmentFlow}
+                                    className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-bold text-white hover:bg-primary/90 transition-colors"
+                                >
+                                    <span className="material-symbols-outlined text-[18px]">add_task</span>
+                                    New Assignment
+                                </button>
+                            ) : (
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setMapMode("placing");
+                                        setNewPinCoords(null);
+                                    }}
+                                    className="inline-flex items-center gap-2 rounded-lg border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-4 py-2 text-sm font-bold text-neutral-700 dark:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors"
+                                >
+                                    <span className="material-symbols-outlined text-[18px]">my_location</span>
+                                    Pick Point
+                                </button>
+                            )}
                         </div>
 
                         <InteractivePlanViewer
                             imageUrl={floorData.gcsImageUrl}
-                            hotspots={commitments.map(c => ({
+                            hotspots={assignments.map(c => ({
                                 _id: c._id,
                                 name: c.name || c.description || c.specialtyName,
                                 coordinates: c.coordinates,
@@ -166,7 +184,7 @@ export function DetailPlanView({
                                 icon: getSpecialtyIcon(c.specialtyName),
                             }))}
                             onHotspotSelect={(hotspot: { _id: string }) => {
-                                const matched = commitments.find(c => c._id === hotspot._id);
+                                const matched = assignments.find(c => c._id === hotspot._id);
                                 if (matched) {
                                     handlePinClick(matched);
                                 }
@@ -179,40 +197,47 @@ export function DetailPlanView({
                     </div>
                 </div>
 
-                {/* Commitment Details Sidebar - Always Open */}
-                <CommitmentDetailsSidebar
-                    commitments={commitments}
-                    selectedCommitmentId={highlightedPinId}
-                    floorId={floorData._id}
-                    statuses={statuses}
-                    onSelectCommitment={(commitment) => {
-                        setHighlightedPinId(commitment._id);
-                        setFocusPulse(p => p + 1);
-                        setHighlightedDayKey(toUtcDateKey(commitment.targetDate));
-                    }}
-                    onClose={() => {
-                        setHighlightedPinId(null);
-                        setHighlightedDayKey(null);
-                    }}
-                />
-            </main >
-
-            {/* New Commitment Modal */}
-            {
-                showNewModal && (
-                    <NewCommitmentModal
-                        onClose={() => { setShowNewModal(false); setNewPinCoords(null); setMapMode("view"); }}
-                        initialX={newPinCoords?.x}
-                        initialY={newPinCoords?.y}
-                        specialties={specialties}
-                        users={users}
-                        statuses={statuses}
+                {isCreatingAssignment ? (
+                    <AssignmentCreateSidebar
+                        floorId={floorData._id}
                         projectId={floorData.projectId}
                         buildingId={floorData.buildingId}
-                        floorId={floorData._id}
+                        specialties={specialties}
+                        pinCoords={newPinCoords}
+                        onPickAnotherPoint={() => {
+                            setMapMode("placing");
+                            setNewPinCoords(null);
+                        }}
+                        onCancel={() => {
+                            setIsCreatingAssignment(false);
+                            setMapMode("view");
+                            setNewPinCoords(null);
+                        }}
+                        onCreated={() => {
+                            setIsCreatingAssignment(false);
+                            setMapMode("view");
+                            setNewPinCoords(null);
+                        }}
                     />
-                )
-            }
+                ) : (
+                    <AssignmentDetailsSidebar
+                        assignments={assignments}
+                        selectedAssignmentId={highlightedPinId}
+                        floorId={floorData._id}
+                        statuses={statuses}
+                        currentUserId={currentUserId}
+                        onSelectAssignment={(assignment) => {
+                            setHighlightedPinId(assignment._id);
+                            setFocusPulse((p) => p + 1);
+                            setHighlightedDayKey(toUtcDateKey(assignment.requiredDate));
+                        }}
+                        onClose={() => {
+                            setHighlightedPinId(null);
+                            setHighlightedDayKey(null);
+                        }}
+                    />
+                )}
+            </main >
         </div >
     );
 }

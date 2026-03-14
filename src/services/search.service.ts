@@ -7,7 +7,7 @@
 
 import mongoose from 'mongoose';
 import { BuildingRepository } from '@/repositories/building.repository';
-import { CommitmentRepository } from '@/repositories/commitment.repository';
+import { AssignmentRepository } from '@/repositories/assignment.repository';
 import type {
     IActivitySearchResultDTO,
     IBuildingSearchResultDTO,
@@ -77,14 +77,13 @@ export class SearchService {
 
             const viewerObjectId = new mongoose.Types.ObjectId(userId);
             visibilityFilter.$or = [
-                { assignedTo: viewerObjectId },
                 { requesterId: viewerObjectId },
             ];
         }
 
         const [buildings, activities] = await Promise.all([
             BuildingRepository.searchByProject(projectId, query, effectiveLimit),
-            CommitmentRepository.searchByProject(projectId, query, effectiveLimit, visibilityFilter),
+            AssignmentRepository.searchByProject(projectId, query, effectiveLimit, visibilityFilter),
         ]);
 
         const serializedBuildings: IBuildingSearchResultDTO[] = buildings.map((building) => ({
@@ -106,9 +105,7 @@ export class SearchService {
                 return {
                     kind: 'activity',
                     id: String(activity._id),
-                    name: activity.name || activity.description || 'Unnamed Activity',
-                    customId: activity.customId || undefined,
-                    location: activity.location || undefined,
+                    name: activity.description || 'Unnamed Activity',
                     status: activity.status,
                     buildingId: toEntityIdString(building),
                     buildingName: building?.name || 'Unknown Building',

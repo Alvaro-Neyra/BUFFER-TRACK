@@ -2,60 +2,51 @@
 
 import React, { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { createCommitment } from "@/app/detail/[floorId]/actions";
-import type { ISpecialtyOption, IUserOption, IStatusOption } from "@/app/detail/[floorId]/DetailPlanView";
+import { createAssignment } from "@/app/detail/[floorId]/actions";
+import type { ISpecialtyOption, IStatusOption } from "@/app/detail/[floorId]/DetailPlanView";
 
-interface INewCommitmentModalProps {
+interface INewAssignmentModalProps {
     onClose: () => void;
     initialX?: number;
     initialY?: number;
     specialties: ISpecialtyOption[];
-    users: IUserOption[];
     statuses: IStatusOption[];
     projectId: string;
     buildingId: string;
     floorId: string;
 }
 
-export const NewCommitmentModal = ({
+export const NewAssignmentModal = ({
     onClose,
     initialX,
     initialY,
     specialties,
-    users,
     statuses,
     projectId,
     buildingId,
     floorId,
-}: Readonly<INewCommitmentModalProps>) => {
+}: Readonly<INewAssignmentModalProps>) => {
     const router = useRouter();
     const [isPending, startTransition] = useTransition();
     const [description, setDescription] = useState("");
     const [specialtyId, setSpecialtyId] = useState("");
-    const [assignedTo, setAssignedTo] = useState("");
     const [status, setStatus] = useState(statuses.length > 0 ? statuses[0].name : "Request");
-    const [targetDate, setTargetDate] = useState("");
+    const [requiredDate, setRequiredDate] = useState("");
     const [xPercent, setXPercent] = useState(initialX ?? 50);
     const [yPercent, setYPercent] = useState(initialY ?? 50);
 
-    // Filter users by selected specialty
-    const filteredUsers = specialtyId
-        ? users.filter(u => u.specialtyId === specialtyId)
-        : users;
-
     const handleSubmit = () => {
-        if (!description || !specialtyId || !status) return;
+        if (!description || !specialtyId || !status || !requiredDate) return;
 
         startTransition(async () => {
-            const res = await createCommitment({
+            const res = await createAssignment({
                 projectId,
                 buildingId,
                 floorId,
                 specialtyId,
-                assignedTo: assignedTo || undefined,
                 description,
                 status,
-                targetDate: targetDate || undefined,
+                requiredDate,
                 coordinates: { xPercent, yPercent },
             });
 
@@ -63,7 +54,7 @@ export const NewCommitmentModal = ({
                 router.refresh();
                 onClose();
             } else {
-                alert(res.error || "Failed to create commitment");
+                alert(res.error || "Failed to create assignment");
             }
         });
     };
@@ -72,7 +63,7 @@ export const NewCommitmentModal = ({
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-neutral-900/50 backdrop-blur-sm">
             <div className="bg-white dark:bg-neutral-900 rounded-xl shadow-2xl max-w-lg w-full overflow-hidden border border-neutral-200 dark:border-neutral-800 flex flex-col max-h-[90vh]">
                 <div className="px-6 py-4 border-b border-neutral-200 dark:border-neutral-800 flex justify-between items-center bg-neutral-50 dark:bg-neutral-800/50">
-                    <h2 className="text-lg font-bold text-neutral-900 dark:text-white">Create New Commitment</h2>
+                    <h2 className="text-lg font-bold text-neutral-900 dark:text-white">Create New Assignment</h2>
                     <button onClick={onClose} className="text-neutral-500 hover:text-neutral-900 dark:hover:text-white transition-colors">
                         <span className="material-symbols-outlined">close</span>
                     </button>
@@ -98,13 +89,13 @@ export const NewCommitmentModal = ({
                         />
                     </div>
 
-                    {/* Specialty + Assigned User */}
+                    {/* Specialty */}
                     <div className="grid grid-cols-2 gap-4">
                         <div>
                             <label className="block text-xs font-bold uppercase tracking-wider text-neutral-600 dark:text-neutral-400 mb-2">Specialty *</label>
                             <select
                                 value={specialtyId}
-                                onChange={(e) => { setSpecialtyId(e.target.value); setAssignedTo(""); }}
+                                onChange={(e) => setSpecialtyId(e.target.value)}
                                 className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 rounded-lg text-neutral-900 dark:text-white focus:ring-2 focus:ring-primary focus:border-transparent text-sm"
                             >
                                 <option value="">Select specialty...</option>
@@ -112,22 +103,6 @@ export const NewCommitmentModal = ({
                                     <option key={s._id} value={s._id}>{s.name}</option>
                                 ))}
                             </select>
-                        </div>
-                        <div>
-                            <label className="block text-xs font-bold uppercase tracking-wider text-neutral-600 dark:text-neutral-400 mb-2">Assign To</label>
-                            <select
-                                value={assignedTo}
-                                onChange={(e) => setAssignedTo(e.target.value)}
-                                className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 rounded-lg text-neutral-900 dark:text-white focus:ring-2 focus:ring-primary focus:border-transparent text-sm"
-                            >
-                                <option value="">Select user...</option>
-                                {filteredUsers.map(u => (
-                                    <option key={u._id} value={u._id}>{u.name} ({u.company})</option>
-                                ))}
-                            </select>
-                            {specialtyId && filteredUsers.length === 0 && (
-                                <p className="text-xs text-amber-500 mt-1">No users with this specialty found</p>
-                            )}
                         </div>
                     </div>
 
@@ -145,13 +120,13 @@ export const NewCommitmentModal = ({
                         </select>
                     </div>
 
-                    {/* Target Date + Coordinates */}
+                    {/* Required Date + Coordinates */}
                     <div className="grid grid-cols-2 gap-4">
                         <div>
-                            <label className="block text-xs font-bold uppercase tracking-wider text-neutral-600 dark:text-neutral-400 mb-2">Target Date</label>
+                            <label className="block text-xs font-bold uppercase tracking-wider text-neutral-600 dark:text-neutral-400 mb-2">Required Date *</label>
                             <input
-                                type="date" value={targetDate}
-                                onChange={(e) => setTargetDate(e.target.value)}
+                                type="date" value={requiredDate}
+                                onChange={(e) => setRequiredDate(e.target.value)}
                                 className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 rounded-lg text-neutral-900 dark:text-white focus:ring-2 focus:ring-primary focus:border-transparent text-sm"
                             />
                         </div>
@@ -180,10 +155,10 @@ export const NewCommitmentModal = ({
                     </button>
                     <button
                         onClick={handleSubmit}
-                        disabled={isPending || !description || !specialtyId}
+                        disabled={isPending || !description || !specialtyId || !requiredDate}
                         className="px-6 py-2 text-sm font-bold bg-primary hover:bg-primary/90 text-white rounded-lg shadow-sm transition-transform active:scale-95 disabled:opacity-50"
                     >
-                        {isPending ? "Creating..." : "Create Commitment"}
+                        {isPending ? "Creating..." : "Create Assignment"}
                     </button>
                 </div>
             </div>

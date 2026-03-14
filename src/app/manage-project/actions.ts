@@ -10,7 +10,7 @@ import { FloorRepository } from "@/repositories/floor.repository";
 import { SpecialtyRepository } from "@/repositories/specialty.repository";
 import { statusRepository } from "@/repositories/status.repository";
 import { roleRepository } from "@/repositories/role.repository";
-import { CommitmentRepository } from "@/repositories/commitment.repository";
+import { AssignmentRepository } from "@/repositories/assignment.repository";
 import { UserRepository } from "@/repositories/user.repository";
 import { deleteCloudinaryAsset, extractCloudinaryPublicId } from "@/lib/cloudinary";
 import { revalidatePath } from "next/cache";
@@ -20,17 +20,6 @@ import mongoose from "mongoose";
 type TAccessResult =
     | { ok: true; userId: string }
     | { ok: false; message: string };
-
-type TProjectContextResult =
-    | { projectId: string }
-    | { error: string };
-
-function asObjectIdString(value: unknown): string | null {
-    if (typeof value !== "string" || !mongoose.isValidObjectId(value)) {
-        return null;
-    }
-    return value;
-}
 
 function normalizeOptionalString(value: unknown): string | undefined {
     if (typeof value !== "string") {
@@ -52,36 +41,9 @@ async function resolveProjectIdFromFloorId(floorId: string): Promise<string | nu
     return resolveProjectIdFromBuildingId(floor.buildingId.toString());
 }
 
-async function resolveProjectIdFromCommitmentId(commitmentId: string): Promise<string | null> {
-    const commitment = await CommitmentRepository.findById(commitmentId);
-    return commitment?.projectId?.toString() || null;
-}
-
-async function resolveCommitmentProjectContext(payload: Record<string, unknown>): Promise<TProjectContextResult> {
-    const payloadProjectId = asObjectIdString(payload.projectId);
-    const buildingId = asObjectIdString(payload.buildingId);
-    const floorId = asObjectIdString(payload.floorId);
-
-    const [projectIdFromBuilding, projectIdFromFloor] = await Promise.all([
-        buildingId ? resolveProjectIdFromBuildingId(buildingId) : Promise.resolve(null),
-        floorId ? resolveProjectIdFromFloorId(floorId) : Promise.resolve(null),
-    ]);
-
-    const candidates = [payloadProjectId, projectIdFromBuilding, projectIdFromFloor].filter(
-        (candidate): candidate is string => Boolean(candidate)
-    );
-
-    if (candidates.length === 0) {
-        return { error: "Invalid project context" };
-    }
-
-    const canonicalProjectId = candidates[0];
-    const hasMismatch = candidates.some((candidate) => candidate !== canonicalProjectId);
-    if (hasMismatch) {
-        return { error: "Invalid project context" };
-    }
-
-    return { projectId: canonicalProjectId };
+async function resolveProjectIdFromAssignmentId(assignmentId: string): Promise<string | null> {
+    const assignment = await AssignmentRepository.findById(assignmentId);
+    return assignment?.projectId?.toString() || null;
 }
 
 async function requireProjectManagerAccess(projectId: string): Promise<TAccessResult> {
@@ -134,18 +96,6 @@ async function requireProjectManagerAccess(projectId: string): Promise<TAccessRe
     }
 
     return { ok: false, message: "Unauthorized" };
-}
-
-function validateRestrictedStatusRemoved(status: unknown): string | null {
-    if (typeof status !== "string") {
-        return null;
-    }
-
-    if (status.trim().toLowerCase() === "restricted") {
-        return "Restricted status is no longer available";
-    }
-
-    return null;
 }
 
 // ─── Project Settings Actions ─────────────────────────────────────
@@ -430,49 +380,14 @@ export async function deleteFloor(floorId: string) {
     }
 }
 
-// ─── Commitment (Activity) Management Actions ─────────────────────
+// ─── Assignment (Activity) Management Actions ─────────────────────
 
-export async function createCommitment(data: Record<string, unknown>) {
-    const context = await resolveCommitmentProjectContext(data);
-    if ("error" in context) {
-        return actionError(context.error);
-    }
-
-    const access = await requireProjectManagerAccess(context.projectId);
-    if (!access.ok) {
-        return actionError(access.message);
-    }
-
-    const restrictedStatusError = validateRestrictedStatusRemoved(data.status);
-    if (restrictedStatusError) {
-        return actionError(restrictedStatusError);
-    }
-
-    const normalizedStatus = typeof data.status === "string" ? data.status.trim() : data.status;
-
-    await connectToDatabase();
-
-    try {
-        const commitment = await CommitmentRepository.create({
-            ...data,
-            ...(typeof normalizedStatus === "string" ? { status: normalizedStatus } : {}),
-            projectId: context.projectId,
-            requesterId: access.userId,
-        });
-        revalidatePath('/manage-project');
-        return actionSuccess(commitment);
-    } catch (error) {
-        console.error("Failed to create commitment:", error);
-        return actionError("Failed to create activity");
-    }
-}
-
-export async function updateCommitment(commitmentId: string, data: Record<string, unknown>) {
-    if (!mongoose.isValidObjectId(commitmentId)) {
+export async function updateAssignment(assignmentId: string, data: Record<string, unknown>) {
+    if (!mongoose.isValidObjectId(assignmentId)) {
         return actionError("Invalid activity id");
     }
 
-    const projectId = await resolveProjectIdFromCommitmentId(commitmentId);
+    const projectId = await resolveProjectIdFromAssignmentId(assignmentId);
     if (!projectId) {
         return actionError("Activity not found");
     }
@@ -482,34 +397,29 @@ export async function updateCommitment(commitmentId: string, data: Record<string
         return actionError(access.message);
     }
 
-    const restrictedStatusError = validateRestrictedStatusRemoved(data.status);
-    if (restrictedStatusError) {
-        return actionError(restrictedStatusError);
-    }
-
     const normalizedStatus = typeof data.status === "string" ? data.status.trim() : data.status;
 
     await connectToDatabase();
 
     try {
-        const commitment = await CommitmentRepository.update(commitmentId, {
+        const assignment = await AssignmentRepository.update(assignmentId, {
             ...data,
             ...(typeof normalizedStatus === "string" ? { status: normalizedStatus } : {}),
         });
         revalidatePath('/manage-project');
-        return actionSuccess(commitment);
+        return actionSuccess(assignment);
     } catch (error) {
-        console.error("Failed to update commitment:", error);
+        console.error("Failed to update assignment:", error);
         return actionError("Failed to update activity");
     }
 }
 
-export async function deleteCommitment(commitmentId: string) {
-    if (!mongoose.isValidObjectId(commitmentId)) {
+export async function deleteAssignment(assignmentId: string) {
+    if (!mongoose.isValidObjectId(assignmentId)) {
         return actionError("Invalid activity id");
     }
 
-    const projectId = await resolveProjectIdFromCommitmentId(commitmentId);
+    const projectId = await resolveProjectIdFromAssignmentId(assignmentId);
     if (!projectId) {
         return actionError("Activity not found");
     }
@@ -522,11 +432,11 @@ export async function deleteCommitment(commitmentId: string) {
     await connectToDatabase();
 
     try {
-        await CommitmentRepository.delete(commitmentId);
+        await AssignmentRepository.delete(assignmentId);
         revalidatePath('/manage-project');
         return actionSuccess(true);
     } catch (error) {
-        console.error("Failed to delete commitment:", error);
+        console.error("Failed to delete assignment:", error);
         return actionError("Failed to delete activity");
     }
 }
@@ -647,10 +557,6 @@ export async function createStatus(data: { projectId: string; name: string; colo
         return actionError("Invalid project id");
     }
 
-    if (data.name.trim().toLowerCase() === "restricted") {
-        return actionError("Restricted status is no longer available");
-    }
-
     const access = await requireProjectManagerAccess(data.projectId);
     if (!access.ok) {
         return actionError(access.message);
@@ -659,8 +565,19 @@ export async function createStatus(data: { projectId: string; name: string; colo
     await connectToDatabase();
 
     try {
+        const normalizedName = data.name.trim();
+        if (!normalizedName) {
+            return actionError("Status name is required");
+        }
+
+        const existing = await statusRepository.findByName(normalizedName, data.projectId);
+        if (existing) {
+            return actionError("A status with this name already exists in this project");
+        }
+
         const status = await statusRepository.create({
-            name: data.name,
+            projectId: new mongoose.Types.ObjectId(data.projectId),
+            name: normalizedName,
             colorHex: data.colorHex,
             isPPC: data.isPPC,
         });
@@ -677,10 +594,6 @@ export async function updateStatus(id: string, data: { projectId: string; name?:
         return actionError("Invalid id");
     }
 
-    if (typeof data.name === "string" && data.name.trim().toLowerCase() === "restricted") {
-        return actionError("Restricted status is no longer available");
-    }
-
     const access = await requireProjectManagerAccess(data.projectId);
     if (!access.ok) {
         return actionError(access.message);
@@ -689,8 +602,25 @@ export async function updateStatus(id: string, data: { projectId: string; name?:
     await connectToDatabase();
 
     try {
+        const existingStatus = await statusRepository.getByIdInProject(id, data.projectId);
+        if (!existingStatus) {
+            return actionError("Status not found in current project");
+        }
+
+        const normalizedName = typeof data.name === 'string' ? data.name.trim() : undefined;
+        if (typeof data.name === 'string' && !normalizedName) {
+            return actionError("Status name is required");
+        }
+
+        if (typeof normalizedName === 'string' && normalizedName.length > 0) {
+            const nameConflict = await statusRepository.findByName(normalizedName, data.projectId);
+            if (nameConflict && nameConflict._id.toString() !== id) {
+                return actionError("A status with this name already exists in this project");
+            }
+        }
+
         const status = await statusRepository.update(id, {
-            ...(typeof data.name !== 'undefined' ? { name: data.name } : {}),
+            ...(typeof normalizedName !== 'undefined' ? { name: normalizedName } : {}),
             ...(typeof data.colorHex !== 'undefined' ? { colorHex: data.colorHex } : {}),
             ...(typeof data.isPPC !== 'undefined' ? { isPPC: data.isPPC } : {}),
         });
@@ -715,6 +645,11 @@ export async function deleteStatus(id: string, projectId: string) {
     await connectToDatabase();
 
     try {
+        const existingStatus = await statusRepository.getByIdInProject(id, projectId);
+        if (!existingStatus) {
+            return actionError("Status not found in current project");
+        }
+
         await statusRepository.delete(id);
         revalidatePath('/manage-project');
         return actionSuccess(true);

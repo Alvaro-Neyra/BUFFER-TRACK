@@ -16,7 +16,7 @@ import '@/models/User';
 import '@/models/Project';
 import '@/models/Building';
 import '@/models/Floor';
-import '@/models/Commitment';
+import '@/models/Assignment';
 import '@/models/Specialty';
 import '@/models/Role';
 import '@/models/Status';

@@ -1,2 +1,2 @@
-export * from "./CommitmentPin";
+export * from "./AssignmentPin";
 export * from "./MasterPlanHotspot";

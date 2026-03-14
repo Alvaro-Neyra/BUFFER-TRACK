@@ -7,23 +7,24 @@ import type { IUserDTO, ISpecialtyDTO, IStatusDTO, IRoleDTO } from "@/types/mode
 import type { IBuildingWithFloors } from "@/services/project.service";
 import { BuildingsTab } from "./tabs/BuildingsTab";
 import { ActivitiesTab } from "./tabs/ActivitiesTab";
+import { SettingsTab } from "./tabs/SettingsTab";
 
-type TTab = "users" | "buildings" | "activities";
+type TTab = "users" | "buildings" | "assignments" | "settings";
 
 interface IManageProjectViewProps {
     pendingUsers: IUserDTO[];
     activeUsers: IUserDTO[];
     buildings: IBuildingWithFloors[];
-    commitments: ISerializedCommitment[];
+    assignments: ISerializedAssignment[];
     specialties: ISpecialtyDTO[];
     statuses: IStatusDTO[];
     roles: IRoleDTO[];
     currentProjectId: string;
     masterPlanImageUrl: string;
-    commitmentCounts: Record<string, number>;
+    assignmentCounts: Record<string, number>;
 }
 
-export interface ISerializedCommitment {
+export interface ISerializedAssignment {
     _id: string;
     buildingName: string;
     buildingCode: string;
@@ -34,42 +35,35 @@ export interface ISerializedCommitment {
     specialtyId: string;
     specialtyName: string;
     specialtyColor: string;
-    assignedToId: string;
-    assignedToName: string;
     requesterName: string;
+    acceptedById: string;
+    acceptedByName: string;
+    acceptedAt: string | null;
     status: string;
-    startDate: string | null;
-    targetDate: string | null;
-    requestDate: string | null;
+    requiredDate: string | null;
+    createdAt: string | null;
     coordinates: { xPercent: number; yPercent: number };
     polygon?: { xPercent: number; yPercent: number }[];
-    customId?: string;
-    location?: string;
-    dates?: {
-        requestDate?: string | null;
-        startDate?: string | null;
-        targetDate?: string | null;
-        actualCompletionDate?: string | null;
-    };
 }
 
 const TABS: { key: TTab; label: string; icon: string }[] = [
     { key: "users", label: "Users", icon: "group" },
     { key: "buildings", label: "Buildings", icon: "apartment" },
-    { key: "activities", label: "Activities", icon: "assignment" },
+    { key: "assignments", label: "Assignments", icon: "assignment" },
+    { key: "settings", label: "Settings", icon: "tune" },
 ];
 
 export function ManageProjectView({
     pendingUsers,
     activeUsers,
     buildings,
-    commitments,
+    assignments,
     specialties,
     statuses,
     roles,
     currentProjectId,
     masterPlanImageUrl,
-    commitmentCounts,
+    assignmentCounts,
 }: IManageProjectViewProps) {
     const [activeTab, setActiveTab] = useState<TTab>("users");
 
@@ -120,20 +114,24 @@ export function ManageProjectView({
                             buildings={buildings}
                             currentProjectId={currentProjectId}
                             masterPlanImageUrl={masterPlanImageUrl}
-                            commitmentCounts={commitmentCounts}
-                            commitments={commitments}
+                            assignmentCounts={assignmentCounts}
+                            assignments={assignments}
                             specialties={specialties}
                             statuses={statuses}
-                            activeUsers={activeUsers}
                         />
                     )}
-                    {activeTab === "activities" && (
+                    {activeTab === "assignments" && (
                         <ActivitiesTab
-                            commitments={commitments}
+                            assignments={assignments}
+                            specialties={specialties}
+                            statuses={statuses}
+                        />
+                    )}
+                    {activeTab === "settings" && (
+                        <SettingsTab
                             specialties={specialties}
                             statuses={statuses}
                             roles={roles}
-                            users={activeUsers}
                             currentProjectId={currentProjectId}
                         />
                     )}

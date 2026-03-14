@@ -179,7 +179,7 @@ export function RegisterView({ initialSpecialties = [], initialRoles = [] }: Reg
 
                         <div className="text-center mb-8">
                             <h2 className="text-lg font-bold text-neutral-900 dark:text-white mb-2">Create an account</h2>
-                            <p className="text-sm text-neutral-500 dark:text-neutral-400">Join a project to manage construction commitments.</p>
+                            <p className="text-sm text-neutral-500 dark:text-neutral-400">Join a project to manage construction assignments.</p>
                         </div>
 
                         <form onSubmit={handleRegister} className="space-y-4">

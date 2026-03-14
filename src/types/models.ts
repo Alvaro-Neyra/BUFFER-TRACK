@@ -74,8 +74,6 @@ export interface IActivitySearchResultDTO {
     kind: 'activity';
     id: string;
     name: string;
-    customId?: string;
-    location?: string;
     status: string;
     buildingId: string;
     buildingName: string;
