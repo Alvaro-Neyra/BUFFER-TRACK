@@ -6,6 +6,7 @@
 
 import connectToDatabase from '@/lib/mongodb';
 import Project, { type IProject } from '@/models/Project';
+import { statusRepository } from '@/repositories/status.repository';
 import mongoose from 'mongoose';
 
 export class ProjectRepository {
@@ -43,7 +44,9 @@ export class ProjectRepository {
     /** Create a new project document. */
     static async create(payload: Record<string, unknown>): Promise<IProject> {
         await this.connect();
-        return Project.create(payload) as Promise<IProject>;
+        const project = await Project.create(payload) as IProject;
+        await statusRepository.ensureDefaultStatuses(project._id.toString());
+        return project;
     }
 
     /** Update a project by its ObjectId. */

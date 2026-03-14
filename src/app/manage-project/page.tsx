@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import connectToDatabase from "@/lib/mongodb";
 import { UserAdminService } from "@/services/userAdmin.service";
 import { ProjectService } from "@/services/project.service";
-import { CommitmentRepository } from "@/repositories/commitment.repository";
+import { AssignmentRepository } from "@/repositories/assignment.repository";
 import { SpecialtyRepository } from "@/repositories/specialty.repository";
 import { statusRepository } from "@/repositories/status.repository";
 import { roleRepository } from "@/repositories/role.repository";
@@ -40,8 +40,8 @@ export default async function ManageProjectPage({
         activeDbProjectIds.length > 0
             ? activeDbProjectIds
             : session.user.projects
-                  ?.filter((p) => p.status === "Active")
-                  .map((p) => p.projectId) || [];
+                ?.filter((p) => p.status === "Active")
+                .map((p) => p.projectId) || [];
 
     if (userProjectIds.length === 0) {
         return <PendingAccessView />;
@@ -119,48 +119,40 @@ export default async function ManageProjectPage({
     }
 
     // Fetch all data in parallel
-    const [userResult, buildings, commitments, specialties, statuses, roles] = await Promise.all([
+    const [userResult, buildings, assignments, specialties, statuses, roles] = await Promise.all([
         UserAdminService.getUsersByProject(currentProjectId, session.user.id || ""),
         ProjectService.getBuildingsWithFloors(currentProjectId),
-        CommitmentRepository.findByProjectPopulated(currentProjectId),
+        AssignmentRepository.findByProjectPopulated(currentProjectId),
         SpecialtyRepository.findByProjectId(currentProjectId),
-        statusRepository.getAll(),
+        statusRepository.getAll(currentProjectId),
         roleRepository.getByProjectId(currentProjectId),
     ]);
 
-    // Serialize commitments for client
+    // Serialize assignments for client
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const serializedCommitments = commitments.map((c: any) => ({
+    const serializedAssignments = assignments.map((c: any) => ({
         _id: c._id.toString(),
         buildingName: c.buildingId?.name || "N/A",
         buildingCode: c.buildingId?.code || "",
         floorId: c.floorId?._id?.toString() || c.floorId?.toString() || "",
         floorLabel: c.floorId?.label || "N/A",
-        name: c.name || "Activity",
+        name: c.description || "Activity",
         description: c.description || "",
         specialtyId: c.specialtyId?._id?.toString() || c.specialtyId?.toString() || "",
         specialtyName: c.specialtyId?.name || "N/A",
         specialtyColor: c.specialtyId?.colorHex || "#cbd5e1",
-        assignedToId: c.assignedTo?._id?.toString() || c.assignedTo?.toString() || "",
-        assignedToName: c.assignedTo?.name || "Unassigned",
         requesterName: c.requesterId?.name || "Unknown",
+        acceptedById: c.acceptedById?._id?.toString() || c.acceptedById?.toString() || "",
+        acceptedByName: c.acceptedById?.name || "",
+        acceptedAt: c.acceptedAt?.toISOString() || null,
         status: c.status,
-        startDate: c.dates?.startDate?.toISOString() || null,
-        targetDate: c.dates?.targetDate?.toISOString() || null,
-        requestDate: c.dates?.requestDate?.toISOString() || null,
+        requiredDate: c.requiredDate?.toISOString() || null,
+        createdAt: c.createdAt?.toISOString() || null,
         coordinates: c.coordinates,
         polygon: c.polygon?.map((p: { xPercent: number; yPercent: number }) => ({
             xPercent: p.xPercent,
             yPercent: p.yPercent,
         })) || undefined,
-        customId: c.customId || "",
-        location: c.location || "",
-        dates: {
-            startDate: c.dates?.startDate?.toISOString() || null,
-            targetDate: c.dates?.targetDate?.toISOString() || null,
-            requestDate: c.dates?.requestDate?.toISOString() || null,
-            actualCompletionDate: c.dates?.actualCompletionDate?.toISOString() || null,
-        }
     }));
 
     // Serialize specialties for client
@@ -188,12 +180,12 @@ export default async function ManageProjectPage({
         specialtiesIds: (r.specialtiesIds || []).map((id) => id.toString()),
     }));
 
-    // Compute commitment counts per building
-    const commitmentCounts: Record<string, number> = {};
+    // Compute assignment counts per building
+    const assignmentCounts: Record<string, number> = {};
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    commitments.forEach((c: any) => {
+    assignments.forEach((c: any) => {
         const bId = c.buildingId?._id?.toString() || c.buildingId?.toString() || "";
-        if (bId) commitmentCounts[bId] = (commitmentCounts[bId] || 0) + 1;
+        if (bId) assignmentCounts[bId] = (assignmentCounts[bId] || 0) + 1;
     });
 
     // Fetch master plan image from DB
@@ -205,13 +197,13 @@ export default async function ManageProjectPage({
             pendingUsers={userResult.pendingUsers}
             activeUsers={userResult.activeUsers}
             buildings={buildings}
-            commitments={serializedCommitments}
+            assignments={serializedAssignments}
             specialties={serializedSpecialties}
             statuses={serializedStatuses}
             roles={serializedRoles}
             currentProjectId={currentProjectId}
             masterPlanImageUrl={masterPlanImageUrl}
-            commitmentCounts={commitmentCounts}
+            assignmentCounts={assignmentCounts}
         />
     );
 }

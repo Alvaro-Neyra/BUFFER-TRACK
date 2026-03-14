@@ -6,7 +6,7 @@
 //      thin wrapper handling only session auth, then delegates here.
 // ------------------------------------------------------------------
 
-import { CommitmentRepository } from '@/repositories/commitment.repository';
+import { AssignmentRepository } from '@/repositories/assignment.repository';
 import { UserRepository } from '@/repositories/user.repository';
 import { statusRepository } from '@/repositories/status.repository';
 import mongoose from 'mongoose';
@@ -62,14 +62,14 @@ export class DashboardService {
         const nextWeekQuery = { ...matchQuery, weekStart: { $gte: nextWeekStart, $lt: nextWeekEnd } };
 
         // Get statuses that count for PPC
-        const allStatuses = await statusRepository.getAll();
+        const allStatuses = await statusRepository.getAll(projectId);
         const ppcStatusNames = allStatuses.filter(s => s.isPPC).map(s => s.name);
         
         // Default to 'Completed' if no statuses are marked as isPPC to avoid breaking dashboard
         const ppcFilter = ppcStatusNames.length > 0 ? ppcStatusNames : ['Completed'];
 
         // 1. Overall PPC
-        const overallStats = await CommitmentRepository.aggregate([
+        const overallStats = await AssignmentRepository.aggregate([
             { $match: thisWeekQuery },
             {
                 $group: {
@@ -87,51 +87,51 @@ export class DashboardService {
             : 0;
 
         // 2A. PPC by Specialty
-        const ppcBySpecialty = await CommitmentRepository.aggregate([
+        const ppcBySpecialty = await AssignmentRepository.aggregate([
             { $match: thisWeekQuery },
             { $group: { _id: '$specialtyId', total: { $sum: 1 }, completed: { $sum: { $cond: [{ $in: ['$status', ppcFilter] }, 1, 0] } } } },
             { $lookup: { from: 'specialties', localField: '_id', foreignField: '_id', as: 'specialty' } },
             { $unwind: { path: '$specialty', preserveNullAndEmptyArrays: true } },
-            { $project: { name: { $ifNull: ['$specialty.name', 'Unknown'] }, color: { $ifNull: ['$specialty.color', '#cbd5e1'] }, ppc: { $round: [{ $multiply: [{ $divide: ['$completed', '$total'] }, 100] }, 0] }, total: 1, completed: 1 } },
+            { $project: { _id: { $toString: '$_id' }, name: { $ifNull: ['$specialty.name', 'Unknown'] }, color: { $ifNull: ['$specialty.color', '#cbd5e1'] }, ppc: { $round: [{ $multiply: [{ $divide: ['$completed', '$total'] }, 100] }, 0] }, total: 1, completed: 1 } },
             { $sort: { ppc: -1 } },
         ]);
 
         // 2B. PPC by Subcontractor
-        const ppcBySubcontractor = await CommitmentRepository.aggregate([
-            { $match: { ...thisWeekQuery, assignedTo: { $exists: true, $ne: null } } },
-            { $group: { _id: '$assignedTo', total: { $sum: 1 }, completed: { $sum: { $cond: [{ $in: ['$status', ppcFilter] }, 1, 0] } } } },
+        const ppcBySubcontractor = await AssignmentRepository.aggregate([
+            { $match: thisWeekQuery },
+            { $group: { _id: '$requesterId', total: { $sum: 1 }, completed: { $sum: { $cond: [{ $in: ['$status', ppcFilter] }, 1, 0] } } } },
             { $lookup: { from: 'users', localField: '_id', foreignField: '_id', as: 'user' } },
             { $unwind: { path: '$user', preserveNullAndEmptyArrays: true } },
-            { $project: { name: { $concat: ['$user.firstName', ' ', '$user.lastName'] }, company: { $ifNull: ['$user.companyName', 'N/A'] }, ppc: { $round: [{ $multiply: [{ $divide: ['$completed', '$total'] }, 100] }, 0] }, total: 1, completed: 1 } },
+            { $project: { _id: { $toString: '$_id' }, name: { $concat: ['$user.firstName', ' ', '$user.lastName'] }, company: { $ifNull: ['$user.companyName', 'N/A'] }, ppc: { $round: [{ $multiply: [{ $divide: ['$completed', '$total'] }, 100] }, 0] }, total: 1, completed: 1 } },
             { $sort: { ppc: -1 } },
         ]);
 
         // 2C. PPC by Zone (Floor)
-        const ppcByZone = await CommitmentRepository.aggregate([
+        const ppcByZone = await AssignmentRepository.aggregate([
             { $match: thisWeekQuery },
             { $group: { _id: '$floorId', total: { $sum: 1 }, completed: { $sum: { $cond: [{ $in: ['$status', ppcFilter] }, 1, 0] } } } },
             { $lookup: { from: 'floors', localField: '_id', foreignField: '_id', as: 'floor' } },
             { $unwind: { path: '$floor', preserveNullAndEmptyArrays: true } },
-            { $project: { level: { $ifNull: ['$floor.level', 'Unknown Level'] }, ppc: { $round: [{ $multiply: [{ $divide: ['$completed', '$total'] }, 100] }, 0] }, total: 1, completed: 1 } },
+            { $project: { _id: { $toString: '$_id' }, level: { $ifNull: ['$floor.level', 'Unknown Level'] }, ppc: { $round: [{ $multiply: [{ $divide: ['$completed', '$total'] }, 100] }, 0] }, total: 1, completed: 1 } },
             { $sort: { level: 1 } },
         ]);
 
         // 3. Subcontractor Workload: Current vs Next Week
-        const currentWeekLoad = await CommitmentRepository.aggregate([
+        const currentWeekLoad = await AssignmentRepository.aggregate([
             { $match: thisWeekQuery },
-            { $group: { _id: '$assignedTo', count: { $sum: 1 } } },
+            { $group: { _id: '$requesterId', count: { $sum: 1 } } },
         ]);
-        const nextWeekLoad = await CommitmentRepository.aggregate([
+        const nextWeekLoad = await AssignmentRepository.aggregate([
             { $match: nextWeekQuery },
-            { $group: { _id: '$assignedTo', count: { $sum: 1 } } },
+            { $group: { _id: '$requesterId', count: { $sum: 1 } } },
         ]);
 
-        const assignedUserIds = Array.from(new Set([
+        const requesterUserIds = Array.from(new Set([
             ...currentWeekLoad.map((u: { _id?: mongoose.Types.ObjectId }) => u._id?.toString()).filter(Boolean),
             ...nextWeekLoad.map((u: { _id?: mongoose.Types.ObjectId }) => u._id?.toString()).filter(Boolean),
         ]));
 
-        const usersInfo = await UserRepository.findByIds(assignedUserIds as string[], 'firstName lastName companyName');
+        const usersInfo = await UserRepository.findByIds(requesterUserIds as string[], 'firstName lastName companyName');
 
         const subcontractorLoad = usersInfo.map((user) => {
             const userId = user._id.toString();
@@ -149,7 +149,7 @@ export class DashboardService {
         });
 
         // 4. Total pins
-        const totalPinsCount = await CommitmentRepository.countByQuery(matchQuery);
+        const totalPinsCount = await AssignmentRepository.countByQuery(matchQuery);
 
         return {
             globalPPC,

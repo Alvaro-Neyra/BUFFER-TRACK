@@ -2,7 +2,7 @@
 
 import { auth } from "@/lib/auth";
 import connectToDatabase from "@/lib/mongodb";
-import { CommitmentRepository } from "@/repositories/commitment.repository";
+import { AssignmentRepository } from "@/repositories/assignment.repository";
 import { UserRepository } from "@/repositories/user.repository";
 import { FloorRepository } from "@/repositories/floor.repository";
 import { BuildingRepository } from "@/repositories/building.repository";
@@ -14,7 +14,7 @@ import { actionSuccess, actionError } from "@/lib/apiResponse";
 import { parseDateOnlyInput } from "@/lib/dateOnly";
 
 type TProjectAccessResult =
-    | { ok: true; userId: string; isManager: boolean }
+    | { ok: true; userId: string; isManager: boolean; userSpecialtyId: string | null }
     | { ok: false; message: string };
 
 function toObjectIdString(value: unknown): string | null {
@@ -24,16 +24,15 @@ function toObjectIdString(value: unknown): string | null {
     return value;
 }
 
-function memberCanEditCommitment(
+function memberCanEditAssignment(
     userId: string,
     isManager: boolean,
     requesterId: mongoose.Types.ObjectId,
-    assignedTo?: mongoose.Types.ObjectId
+    acceptedById?: mongoose.Types.ObjectId
 ): boolean {
     if (isManager) return true;
-    const requesterMatches = requesterId.toString() === userId;
-    const assigneeMatches = assignedTo?.toString() === userId;
-    return requesterMatches || Boolean(assigneeMatches);
+    if (requesterId.toString() === userId) return true;
+    return Boolean(acceptedById?.toString() === userId);
 }
 
 async function requireActiveProjectAccess(projectId: string): Promise<TProjectAccessResult> {
@@ -54,6 +53,14 @@ async function requireActiveProjectAccess(projectId: string): Promise<TProjectAc
         return { ok: false, message: "Unauthorized" };
     }
 
+    const membershipSpecialty = membership.specialtyId as unknown;
+    const membershipSpecialtyId =
+        membershipSpecialty && typeof membershipSpecialty === "object" && "_id" in membershipSpecialty
+            ? (membershipSpecialty as { _id?: { toString: () => string } })._id?.toString() || null
+            : typeof membershipSpecialty === "string"
+                ? membershipSpecialty
+                : null;
+
     let membershipIsManager = false;
     if (membership.roleId) {
         const membershipRole = await roleRepository.getByIdInProject(membership.roleId, projectId);
@@ -64,19 +71,8 @@ async function requireActiveProjectAccess(projectId: string): Promise<TProjectAc
         ok: true,
         userId: session.user.id,
         isManager: membershipIsManager,
+        userSpecialtyId: membershipSpecialtyId,
     };
-}
-
-function validateRestrictedStatusRemoved(status: unknown): string | null {
-    if (typeof status !== "string") {
-        return null;
-    }
-
-    if (status.trim().toLowerCase() === "restricted") {
-        return "Restricted status is no longer available";
-    }
-
-    return null;
 }
 
 // ─── Data Fetching ───────────────────────────────────────────────
@@ -104,31 +100,28 @@ export async function getFloorData(floorId: string) {
     });
 }
 
-export async function getFloorCommitments(floorId: string) {
+export async function getFloorAssignments(floorId: string) {
     await connectToDatabase();
 
-    const commitments = await CommitmentRepository.findByFloorPopulated(floorId);
+    const assignments = await AssignmentRepository.findByFloorPopulated(floorId);
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return commitments.map((c: any) => ({
+    return assignments.map((c: any) => ({
         _id: c._id.toString(),
-        customId: c.customId || "",
-        location: c.location || "",
-        name: c.name || "",
+        name: c.description || "",
         description: c.description || "",
         status: c.status as string,
         specialtyId: c.specialtyId?._id?.toString() || "",
         specialtyName: c.specialtyId?.name || "N/A",
         specialtyColor: c.specialtyId?.colorHex || "#94a3b8",
-        assignedToId: c.assignedTo?._id?.toString() || "",
-        assignedToName: c.assignedTo?.name || "Unassigned",
-        assignedToCompany: c.assignedTo?.company || "",
         requesterId: c.requesterId?._id?.toString() || c.requesterId?.toString() || "",
         requesterName: c.requesterId?.name || "Unknown",
+        acceptedById: c.acceptedById?._id?.toString() || c.acceptedById?.toString() || "",
+        acceptedByName: c.acceptedById?.name || "",
+        acceptedAt: c.acceptedAt?.toISOString() || null,
         coordinates: { xPercent: c.coordinates.xPercent, yPercent: c.coordinates.yPercent },
-        startDate: c.dates?.startDate?.toISOString() || null,
-        targetDate: c.dates?.targetDate?.toISOString() || null,
-        requestDate: c.dates?.requestDate?.toISOString() || null,
+        requiredDate: c.requiredDate?.toISOString() || null,
+        createdAt: c.createdAt?.toISOString() || null,
         weekStart: c.weekStart?.toISOString() || null,
     }));
 }
@@ -184,24 +177,23 @@ export async function getSpecialtiesWithUsers(projectId: string) {
 
 // ─── Mutations ───────────────────────────────────────────────────
 
-export async function createCommitment(data: {
+export async function createAssignment(data: {
     projectId: string;
     buildingId: string;
     floorId: string;
     specialtyId: string;
-    assignedTo?: string;
     description: string;
     status?: string;
-    targetDate?: string;
+    requiredDate: string;
     coordinates: { xPercent: number; yPercent: number };
+    polygon?: { xPercent: number; yPercent: number }[];
 }) {
     const projectId = toObjectIdString(data.projectId);
     const buildingId = toObjectIdString(data.buildingId);
     const floorId = toObjectIdString(data.floorId);
     const specialtyId = toObjectIdString(data.specialtyId);
-    const assignedToId = data.assignedTo ? toObjectIdString(data.assignedTo) : null;
 
-    if (!projectId || !buildingId || !floorId || !specialtyId || (data.assignedTo && !assignedToId)) {
+    if (!projectId || !buildingId || !floorId || !specialtyId) {
         return actionError("Invalid project context");
     }
 
@@ -211,18 +203,13 @@ export async function createCommitment(data: {
     }
 
     const normalizedStatus = typeof data.status === "string" ? data.status.trim() : undefined;
-    const restrictedStatusError = validateRestrictedStatusRemoved(normalizedStatus);
-    if (restrictedStatusError) {
-        return actionError(restrictedStatusError);
-    }
 
     await connectToDatabase();
 
-    const [building, floor, specialty, assignedUser] = await Promise.all([
+    const [building, floor, specialty] = await Promise.all([
         BuildingRepository.findById(buildingId),
         FloorRepository.findById(floorId),
         SpecialtyRepository.findById(specialtyId),
-        assignedToId ? UserRepository.findById(assignedToId) : Promise.resolve(null),
     ]);
 
     if (!building || building.projectId.toString() !== projectId) {
@@ -234,62 +221,47 @@ export async function createCommitment(data: {
     if (!specialty || specialty.projectId.toString() !== projectId) {
         return actionError("Invalid specialty for project");
     }
-    if (
-        assignedToId &&
-        (!assignedUser || !assignedUser.projects.some((project) => project.projectId.toString() === projectId && project.status === "Active"))
-    ) {
-        return actionError("Assigned user is not active in this project");
+
+    const parsedRequiredDate = parseDateOnlyInput(data.requiredDate);
+    if (!parsedRequiredDate) {
+        return actionError("Invalid required date");
     }
 
-    // Calculate weekStart (Monday of the target week) in UTC for date-only consistency.
-    let parsedTargetDate: Date | undefined;
-    let weekStart: Date | undefined;
-    if (data.targetDate) {
-        const target = parseDateOnlyInput(data.targetDate);
-        if (!target) {
-            return actionError("Invalid target date");
-        }
-
-        parsedTargetDate = target;
-        const day = target.getUTCDay();
-        const diff = target.getUTCDate() - day + (day === 0 ? -6 : 1);
-        weekStart = new Date(Date.UTC(target.getUTCFullYear(), target.getUTCMonth(), diff));
-    }
+    const day = parsedRequiredDate.getUTCDay();
+    const diff = parsedRequiredDate.getUTCDate() - day + (day === 0 ? -6 : 1);
+    const weekStart = new Date(Date.UTC(parsedRequiredDate.getUTCFullYear(), parsedRequiredDate.getUTCMonth(), diff));
 
     try {
-        const commitment = await CommitmentRepository.create({
+        const assignment = await AssignmentRepository.create({
             projectId: new mongoose.Types.ObjectId(projectId),
             buildingId: new mongoose.Types.ObjectId(buildingId),
             floorId: new mongoose.Types.ObjectId(floorId),
             specialtyId: new mongoose.Types.ObjectId(specialtyId),
             requesterId: new mongoose.Types.ObjectId(access.userId),
-            assignedTo: assignedToId ? new mongoose.Types.ObjectId(assignedToId) : undefined,
             description: data.description,
-            status: normalizedStatus || "Request",
+            status: normalizedStatus || "Pending",
             coordinates: data.coordinates,
-            dates: {
-                requestDate: new Date(),
-                targetDate: parsedTargetDate,
-            },
+            polygon: data.polygon,
+            requiredDate: parsedRequiredDate,
             weekStart,
         });
 
         revalidatePath(`/detail/${floorId}`);
-        return actionSuccess(commitment);
+        return actionSuccess(assignment);
     } catch (error) {
-        console.error("Failed to create commitment:", error);
-        return actionError("Failed to create commitment");
+        console.error("Failed to create assignment:", error);
+        return actionError("Failed to create assignment");
     }
 }
 
-export async function updateCommitmentStatus(commitmentId: string, status: string, floorId: string) {
-    if (!mongoose.isValidObjectId(commitmentId) || !mongoose.isValidObjectId(floorId)) {
-        return actionError("Invalid commitment context");
+export async function updateAssignmentStatus(assignmentId: string, status: string, floorId: string) {
+    if (!mongoose.isValidObjectId(assignmentId) || !mongoose.isValidObjectId(floorId)) {
+        return actionError("Invalid assignment context");
     }
 
     await connectToDatabase();
 
-    const existing = await CommitmentRepository.findById(commitmentId);
+    const existing = await AssignmentRepository.findById(assignmentId);
     if (!existing) return actionError("Not found");
     if (existing.floorId.toString() !== floorId) {
         return actionError("Invalid floor context");
@@ -299,7 +271,7 @@ export async function updateCommitmentStatus(commitmentId: string, status: strin
     if (!access.ok) {
         return actionError(access.message);
     }
-    if (!memberCanEditCommitment(access.userId, access.isManager, existing.requesterId, existing.assignedTo)) {
+    if (!memberCanEditAssignment(access.userId, access.isManager, existing.requesterId, existing.acceptedById)) {
         return actionError("Forbidden");
     }
 
@@ -308,37 +280,31 @@ export async function updateCommitmentStatus(commitmentId: string, status: strin
         return actionError("Status is required");
     }
 
-    const restrictedStatusError = validateRestrictedStatusRemoved(normalizedStatus);
-    if (restrictedStatusError) {
-        return actionError(restrictedStatusError);
-    }
-
     try {
-        await CommitmentRepository.updateStatus(commitmentId, normalizedStatus);
+        await AssignmentRepository.updateStatus(assignmentId, normalizedStatus);
         revalidatePath(`/detail/${floorId}`);
         return actionSuccess(true);
     } catch (error) {
-        console.error("Failed to update commitment:", error);
+        console.error("Failed to update assignment:", error);
         return actionError("Failed to update status");
     }
 }
 
-export async function updateCommitmentDetails(
-    commitmentId: string,
+export async function updateAssignmentDetails(
+    assignmentId: string,
     data: {
-        startDate?: string | null;
-        targetDate?: string | null;
+        requiredDate?: string | null;
         status?: string;
     },
     floorId: string
 ) {
-    if (!mongoose.isValidObjectId(commitmentId) || !mongoose.isValidObjectId(floorId)) {
-        return actionError("Invalid commitment context");
+    if (!mongoose.isValidObjectId(assignmentId) || !mongoose.isValidObjectId(floorId)) {
+        return actionError("Invalid assignment context");
     }
 
     await connectToDatabase();
 
-    const existing = await CommitmentRepository.findById(commitmentId);
+    const existing = await AssignmentRepository.findById(assignmentId);
     if (!existing) return actionError("Not found");
     if (existing.floorId.toString() !== floorId) {
         return actionError("Invalid floor context");
@@ -348,7 +314,7 @@ export async function updateCommitmentDetails(
     if (!access.ok) {
         return actionError(access.message);
     }
-    if (!memberCanEditCommitment(access.userId, access.isManager, existing.requesterId, existing.assignedTo)) {
+    if (!memberCanEditAssignment(access.userId, access.isManager, existing.requesterId, existing.acceptedById)) {
         return actionError("Forbidden");
     }
 
@@ -359,54 +325,78 @@ export async function updateCommitmentDetails(
             return actionError("Status is required");
         }
 
-        const restrictedStatusError = validateRestrictedStatusRemoved(normalizedStatus);
-        if (restrictedStatusError) {
-            return actionError(restrictedStatusError);
-        }
-
         updatePayload.status = normalizedStatus;
     }
 
-    const nextDates: {
-        requestDate?: Date;
-        startDate?: Date;
-        targetDate?: Date;
-        actualCompletionDate?: Date;
-    } = {
-        ...(existing.dates || {}),
-    };
+    if (data.requiredDate !== undefined) {
+        if (!data.requiredDate) {
+            return actionError("Required date is required");
+        }
 
-    if (data.startDate !== undefined) {
-        if (!data.startDate) {
-            nextDates.startDate = undefined;
-        } else {
-            const parsedStartDate = parseDateOnlyInput(data.startDate);
-            if (!parsedStartDate) {
-                return actionError("Invalid start date");
-            }
-            nextDates.startDate = parsedStartDate;
+        const parsedRequiredDate = parseDateOnlyInput(data.requiredDate);
+        if (!parsedRequiredDate) {
+            return actionError("Invalid required date");
         }
+
+        const day = parsedRequiredDate.getUTCDay();
+        const diff = parsedRequiredDate.getUTCDate() - day + (day === 0 ? -6 : 1);
+        updatePayload.requiredDate = parsedRequiredDate;
+        updatePayload.weekStart = new Date(
+            Date.UTC(parsedRequiredDate.getUTCFullYear(), parsedRequiredDate.getUTCMonth(), diff)
+        );
     }
-    if (data.targetDate !== undefined) {
-        if (!data.targetDate) {
-            nextDates.targetDate = undefined;
-        } else {
-            const parsedTargetDate = parseDateOnlyInput(data.targetDate);
-            if (!parsedTargetDate) {
-                return actionError("Invalid end date");
-            }
-            nextDates.targetDate = parsedTargetDate;
-        }
-    }
-    updatePayload.dates = nextDates;
 
     try {
-        const commitment = await CommitmentRepository.update(commitmentId, updatePayload);
+        const assignment = await AssignmentRepository.update(assignmentId, updatePayload);
         revalidatePath(`/detail/${floorId}`);
         revalidatePath(`/manage-project`);
-        return actionSuccess(commitment);
+        return actionSuccess(assignment);
     } catch (error) {
-        console.error("Failed to update commitment details:", error);
+        console.error("Failed to update assignment details:", error);
         return actionError("Failed to update details");
+    }
+}
+
+export async function acceptAssignment(assignmentId: string, floorId: string) {
+    if (!mongoose.isValidObjectId(assignmentId) || !mongoose.isValidObjectId(floorId)) {
+        return actionError("Invalid assignment context");
+    }
+
+    await connectToDatabase();
+
+    const existing = await AssignmentRepository.findById(assignmentId);
+    if (!existing) return actionError("Not found");
+    if (existing.floorId.toString() !== floorId) {
+        return actionError("Invalid floor context");
+    }
+
+    const access = await requireActiveProjectAccess(existing.projectId.toString());
+    if (!access.ok) {
+        return actionError(access.message);
+    }
+
+    if (!access.userSpecialtyId) {
+        return actionError("You must belong to a specialty to accept this assignment");
+    }
+
+    if (existing.specialtyId.toString() !== access.userSpecialtyId) {
+        return actionError("Only active users from the same specialty can accept this assignment");
+    }
+
+    if (existing.acceptedById) {
+        return actionError("Assignment already accepted");
+    }
+
+    try {
+        await AssignmentRepository.update(assignmentId, {
+            acceptedById: new mongoose.Types.ObjectId(access.userId),
+            acceptedAt: new Date(),
+        });
+        revalidatePath(`/detail/${floorId}`);
+        revalidatePath(`/manage-project`);
+        return actionSuccess(true);
+    } catch (error) {
+        console.error("Failed to accept assignment:", error);
+        return actionError("Failed to accept assignment");
     }
 }

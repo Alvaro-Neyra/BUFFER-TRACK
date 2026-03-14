@@ -7,7 +7,7 @@
 import { ProjectRepository } from '@/repositories/project.repository';
 import { BuildingRepository } from '@/repositories/building.repository';
 import { FloorRepository } from '@/repositories/floor.repository';
-import { CommitmentRepository } from '@/repositories/commitment.repository';
+import { AssignmentRepository } from '@/repositories/assignment.repository';
 import { deleteCloudinaryAsset, extractCloudinaryPublicId } from '@/lib/cloudinary';
 import mongoose from 'mongoose';
 
@@ -27,7 +27,7 @@ interface ISerializedBuilding {
     coordinates: { xPercent: number; yPercent: number };
     polygon?: Array<{ xPercent: number; yPercent: number }>;
     color?: string;
-    floors: Array<{ _id: string; label: string; order: number }>;
+    floors: Array<{ _id: string; label: string; order: number; gcsImageUrl: string }>;
 }
 
 /** Building with nested floors for admin panel. */
@@ -122,8 +122,8 @@ export class ProjectService {
     /**
      * Get all buildings with floors, serialized for the master plan viewer component.
      */
-    static async getBuildingsForMasterPlan(): Promise<ISerializedBuilding[]> {
-        const buildings = await BuildingRepository.findAll();
+    static async getBuildingsForMasterPlan(projectId: string): Promise<ISerializedBuilding[]> {
+        const buildings = await BuildingRepository.findByProjectId(projectId);
 
         const result: ISerializedBuilding[] = [];
         for (const b of buildings) {
@@ -133,6 +133,7 @@ export class ProjectService {
                 _id: String(f._id),
                 label: String(f.label),
                 order: Number(f.order),
+                gcsImageUrl: String(f.gcsImageUrl || ""),
             }));
             result.push(serialized);
         }
@@ -197,13 +198,13 @@ export class ProjectService {
     }
 
     /**
-     * Delete a building and cascade to its floors and commitments.
+     * Delete a building and cascade to its floors and assignments.
      */
     static async deleteBuilding(buildingId: string): Promise<void> {
         const floors = await FloorRepository.findByBuildingId(buildingId);
 
-        // Delete associated commitments
-        await CommitmentRepository.deleteByQuery({ buildingId: new mongoose.Types.ObjectId(buildingId) });
+        // Delete associated assignments
+        await AssignmentRepository.deleteByQuery({ buildingId: new mongoose.Types.ObjectId(buildingId) });
         // Delete associated floors
         await FloorRepository.deleteByBuildingId(buildingId);
         // Delete the building itself
@@ -299,7 +300,7 @@ export class ProjectService {
     }
 
     /**
-     * Delete a floor and its associated commitments.
+     * Delete a floor and its associated assignments.
      */
     static async deleteFloor(floorId: string): Promise<void> {
         const floor = await FloorRepository.findById(floorId);
@@ -307,7 +308,7 @@ export class ProjectService {
             return;
         }
 
-        await CommitmentRepository.deleteByQuery({ floorId: new mongoose.Types.ObjectId(floorId) });
+        await AssignmentRepository.deleteByQuery({ floorId: new mongoose.Types.ObjectId(floorId) });
         await FloorRepository.deleteById(floorId);
 
         await deleteCloudinaryAsset({

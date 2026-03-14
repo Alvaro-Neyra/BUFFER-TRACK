@@ -32,7 +32,7 @@ interface IHotspotData {
     name?: string;     // building name
     code?: string;     // building code
     description?: string; // activity description
-    commitmentCount?: number; // number of commitments (for building hotspots)
+    assignmentCount?: number; // number of assignments (for building hotspots)
     coordinates: { xPercent: number; yPercent: number };
     polygon?: Array<{ xPercent: number; yPercent: number }>;
     color?: string;
@@ -70,8 +70,8 @@ const HOTSPOT_SIZE_BOOST = 3;
 function getHotspotLabel(hotspot: IHotspotData): string {
     const isBuildingHotspot = Array.isArray(hotspot.floors);
     if (isBuildingHotspot) {
-        const count = Math.max(0, hotspot.commitmentCount ?? 0);
-        return count === 1 ? "1 commitment" : `${count} commitments`;
+        const count = Math.max(0, hotspot.assignmentCount ?? 0);
+        return count === 1 ? "1 assignment" : `${count} assignments`;
     }
 
     return hotspot.code || hotspot.name || hotspot.description || "";
@@ -744,7 +744,7 @@ export const InteractivePlanViewer = ({
                         className="absolute top-3 left-3 z-10 bg-white/90 dark:bg-neutral-800/90 backdrop-blur-sm rounded-md shadow-md border border-neutral-200 dark:border-neutral-700 p-2.5 max-h-48 overflow-y-auto"
                         onPointerDown={(e) => e.stopPropagation()}
                     >
-                        <h4 className="text-[9px] font-bold uppercase text-neutral-500 mb-1">Commitments</h4>
+                        <h4 className="text-[9px] font-bold uppercase text-neutral-500 mb-1">Assignments</h4>
                         <div className="flex flex-col gap-0.5">
                             {hotspots.slice(0, 6).map((h, idx) => (
                                 <button

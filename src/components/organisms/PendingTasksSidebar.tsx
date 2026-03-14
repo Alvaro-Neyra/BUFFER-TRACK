@@ -1,30 +1,30 @@
 "use client";
 
 import React, { useState, useMemo } from "react";
-import type { IPendingCommitment } from "@/components/organisms/MasterPlanPage";
+import type { IPendingAssignment } from "@/components/organisms/MasterPlanPage";
 import Link from "next/link";
 
 interface IPendingTasksSidebarProps {
-    commitments: IPendingCommitment[];
+    assignments: IPendingAssignment[];
     onTaskClick: (buildingId: string) => void;
 }
 
-export const PendingTasksSidebar = ({ commitments, onTaskClick }: IPendingTasksSidebarProps) => {
+export const PendingTasksSidebar = ({ assignments, onTaskClick }: IPendingTasksSidebarProps) => {
     const [filterBuilding, setFilterBuilding] = useState<string>("all");
     const [filterSpecialty, setFilterSpecialty] = useState<string>("all");
 
     // Extract unique buildings and specialties for the filters
     const uniqueBuildings = useMemo(() => {
-        const set = new Set(commitments.map(c => c.buildingCode).filter(Boolean));
+        const set = new Set(assignments.map(c => c.buildingCode).filter(Boolean));
         return Array.from(set);
-    }, [commitments]);
+    }, [assignments]);
 
     const uniqueSpecialties = useMemo(() => {
-        const set = new Set(commitments.map(c => c.specialtyName).filter(Boolean));
+        const set = new Set(assignments.map(c => c.specialtyName).filter(Boolean));
         return Array.from(set);
-    }, [commitments]);
+    }, [assignments]);
 
-    const filteredCommitments = commitments.filter(c => {
+    const filteredAssignments = assignments.filter(c => {
         if (filterBuilding !== "all" && c.buildingCode !== filterBuilding) return false;
         if (filterSpecialty !== "all" && c.specialtyName !== filterSpecialty) return false;
         return true;
@@ -58,13 +58,13 @@ export const PendingTasksSidebar = ({ commitments, onTaskClick }: IPendingTasksS
             </div>
 
             <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3">
-                {filteredCommitments.length === 0 ? (
+                {filteredAssignments.length === 0 ? (
                     <div className="text-center py-8 text-neutral-500 flex flex-col items-center gap-2">
                         <span className="material-symbols-outlined text-4xl text-neutral-300 dark:text-neutral-700">task_alt</span>
                         <p className="text-sm">No tasks found</p>
                     </div>
                 ) : (
-                    filteredCommitments.map((task) => (
+                    filteredAssignments.map((task) => (
                         <div
                             key={task._id}
                             onClick={() => {
@@ -102,12 +102,6 @@ export const PendingTasksSidebar = ({ commitments, onTaskClick }: IPendingTasksS
                                     <span className="material-symbols-outlined text-[14px]">location_on</span>
                                     <span>{task.buildingCode} - {task.floorLabel}</span>
                                 </div>
-                                {task.assignedToName && task.assignedToName !== "Unassigned" && (
-                                    <div className="flex items-center gap-1">
-                                        <span className="material-symbols-outlined text-[14px]">person</span>
-                                        <span>{task.assignedToName}</span>
-                                    </div>
-                                )}
                             </div>
                         </div>
                     ))
@@ -116,7 +110,7 @@ export const PendingTasksSidebar = ({ commitments, onTaskClick }: IPendingTasksS
 
             <div className="p-4 border-t border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 z-10">
                 <Link
-                    href="/commitments"
+                    href="/assignments"
                     className="w-full py-2.5 text-sm font-bold text-primary border border-primary/20 hover:bg-primary/5 rounded-md transition-colors flex items-center justify-center gap-2"
                 >
                     <span>View All Tasks</span>

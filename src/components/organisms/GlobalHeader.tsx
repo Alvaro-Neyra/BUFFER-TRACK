@@ -93,7 +93,7 @@ export const GlobalHeader = ({
             return;
         }
 
-        router.push(`/detail/${result.floorId}?commitmentId=${result.id}`);
+        router.push(`/detail/${result.floorId}?assignmentId=${result.id}`);
     };
 
     const handleSearchKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
@@ -346,7 +346,7 @@ export const GlobalHeader = ({
                                                 >
                                                     <p className="text-sm font-semibold leading-tight">{activity.name}</p>
                                                     <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">
-                                                        {activity.buildingCode} · {activity.floorLabel}{activity.customId ? ` · ${activity.customId}` : ''}
+                                                        {activity.buildingCode} · {activity.floorLabel}
                                                     </p>
                                                 </button>
                                             );
@@ -370,7 +370,7 @@ export const GlobalHeader = ({
                         {[
                             { label: "Dashboard", href: "/dashboard" },
                             { label: "Master Plan", href: "/" },
-                            { label: "Commitments", href: "/commitments" },
+                            { label: "Assignments", href: "/assignments" },
                             ...(isManagerRole(session?.user?.role)
                                 ? [{ label: "Manage Project", href: "/manage-project" }]
                                 : [])

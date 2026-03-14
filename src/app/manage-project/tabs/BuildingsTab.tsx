@@ -3,7 +3,8 @@
 import React, { useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
-import { createBuilding, updateBuilding, deleteBuilding, createFloor, updateFloor, deleteFloor, updateMasterPlanImage, createCommitment, updateCommitment, deleteCommitment } from "../actions";
+import { createBuilding, updateBuilding, deleteBuilding, createFloor, updateFloor, deleteFloor, updateMasterPlanImage, updateAssignment, deleteAssignment } from "../actions";
+import { createAssignment } from "@/app/detail/[floorId]/actions";
 import { compressImage, formatFileSize } from "@/lib/compressImage";
 import dynamic from "next/dynamic";
 
@@ -14,19 +15,18 @@ const InteractivePlanViewer = dynamic(
 import { getSpecialtyIcon } from "@/lib/getSpecialtyIcon";
 import type { IPercentPoint } from "@/components/organisms/FreeDrawOverlay";
 import type { IBuildingWithFloors } from "@/services/project.service";
-import type { ISerializedCommitment } from "../ManageProjectView";
-import type { IUserDTO, ISpecialtyDTO, IStatusDTO } from "@/types/models";
+import type { ISerializedAssignment } from "../ManageProjectView";
+import type { ISpecialtyDTO, IStatusDTO } from "@/types/models";
 import { toDateInputValue, toUtcMidnightIso } from "@/lib/dateOnly";
 
 interface IBuildingsTabProps {
     buildings: IBuildingWithFloors[];
     currentProjectId: string;
     masterPlanImageUrl: string;
-    commitmentCounts: Record<string, number>; // buildingId → count
-    commitments: ISerializedCommitment[];
+    assignmentCounts: Record<string, number>; // buildingId → count
+    assignments: ISerializedAssignment[];
     specialties: ISpecialtyDTO[];
     statuses: IStatusDTO[];
-    activeUsers: IUserDTO[];
 }
 
 type TMode = "view" | "placing" | "drawing";
@@ -44,7 +44,7 @@ interface IEditFloorFormState {
     cloudinaryPublicId?: string;
 }
 
-export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, commitmentCounts, commitments, specialties, statuses, activeUsers }: IBuildingsTabProps) {
+export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, assignmentCounts, assignments, specialties, statuses }: IBuildingsTabProps) {
     const router = useRouter();
     const [isPending, startTransition] = useTransition();
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -62,11 +62,17 @@ export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, 
     const [selectedFloor, setSelectedFloor] = useState<string | null>(null);
     const selectedBuildingObj = buildings.find(b => b._id === selectedBuilding);
     const selectedFloorObj = selectedBuildingObj?.floors.find(f => f._id === selectedFloor);
+    const selectedFloorAssignments = selectedFloorObj
+        ? assignments.filter(c => c.floorId === selectedFloorObj._id)
+        : [];
+    const isPlacingAssignment = Boolean(selectedFloorObj && mode === "placing");
 
     const selectableStatuses = useMemo(() => statuses, [statuses]);
 
     // Default status from dynamic list or fallback
-    const defaultStatus = selectableStatuses.length > 0 ? selectableStatuses[0].name : "Request";
+    const defaultStatus = selectableStatuses.find((status) => status.name.toLowerCase() === "pending")?.name
+        || selectableStatuses[0]?.name
+        || "Pending";
 
     // Build form state
     const [newBuilding, setNewBuilding] = useState({ name: "", code: "", number: 1 });
@@ -78,11 +84,12 @@ export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, 
     const [editingBuilding, setEditingBuilding] = useState<string | null>(null);
     const [editForm, setEditForm] = useState({ name: "", code: "", number: 1, color: "#8B5CF6" });
 
-    const [newActivity, setNewActivity] = useState({ name: "", customId: "", location: "", startDate: "", targetDate: "", description: "", specialtyId: "", assignedTo: "", status: defaultStatus });
     const [editingActivity, setEditingActivity] = useState<string | null>(null);
-    const [editActivityForm, setEditActivityForm] = useState({ name: "", customId: "", location: "", startDate: "", targetDate: "", description: "", specialtyId: "", assignedTo: "", status: defaultStatus });
+    const [editActivityForm, setEditActivityForm] = useState({ name: "", description: "", specialtyId: "", requiredDate: "", status: defaultStatus });
     const [selectedActivity, setSelectedActivity] = useState<string | null>(null);
     const [focusPulse, setFocusPulse] = useState(0);
+
+    const [newActivityForm, setNewActivityForm] = useState({ name: "", description: "", specialtyId: "", requiredDate: "" });
 
     // Helpers
     const getStatusColor = (statusName: string) => {
@@ -175,6 +182,29 @@ export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, 
     };
 
     // ─── CRUD handlers ───────────────────────────────────────────
+
+    const handleCreateActivity = () => {
+        if (!pendingCoords || !selectedBuildingObj || !selectedFloorObj) return;
+        startTransition(async () => {
+            const res = await createAssignment({
+                projectId: currentProjectId,
+                buildingId: selectedBuildingObj._id,
+                floorId: selectedFloorObj._id,
+                specialtyId: newActivityForm.specialtyId,
+                description: newActivityForm.description || newActivityForm.name,
+                requiredDate: newActivityForm.requiredDate,
+                coordinates: { xPercent: pendingCoords.x, yPercent: pendingCoords.y },
+            });
+            if (res.success) {
+                setMode("view");
+                setPendingCoords(null);
+                setNewActivityForm({ name: "", description: "", specialtyId: "", requiredDate: "" });
+                router.refresh();
+            } else {
+                alert(res.error || "Failed to create activity");
+            }
+        });
+    };
 
     const handleCreateBuilding = () => {
         if (!pendingCoords) return;
@@ -323,50 +353,13 @@ export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, 
         });
     };
 
-    const handleCreateActivity = () => {
-        if (!pendingCoords || !selectedFloorObj || !selectedBuildingObj) return;
-        startTransition(async () => {
-            const res = await createCommitment({
-                projectId: currentProjectId,
-                buildingId: selectedBuildingObj._id,
-                floorId: selectedFloorObj._id,
-                name: newActivity.name,
-                customId: newActivity.customId,
-                location: newActivity.location,
-                description: newActivity.description,
-                dates: {
-                    startDate: newActivity.startDate ? toUtcMidnightIso(newActivity.startDate) : undefined,
-                    targetDate: newActivity.targetDate ? toUtcMidnightIso(newActivity.targetDate) : undefined,
-                },
-                specialtyId: newActivity.specialtyId,
-                assignedTo: newActivity.assignedTo || null,
-                status: newActivity.status,
-                coordinates: { xPercent: pendingCoords.x, yPercent: pendingCoords.y },
-                ...(pendingPolygon && pendingPolygon.length >= 3 ? { polygon: pendingPolygon } : {})
-            });
-            if (res.success) {
-                setMode("view");
-                setPendingCoords(null);
-                setPendingPolygon(null);
-                setNewActivity({ name: "", customId: "", location: "", startDate: "", targetDate: "", description: "", specialtyId: "", assignedTo: "", status: defaultStatus });
-                router.refresh();
-            } else alert(res.error || "Failed to create activity");
-        });
-    };
-
     const handleEditActivity = (activityId: string) => {
         startTransition(async () => {
-            const res = await updateCommitment(activityId, {
+            const res = await updateAssignment(activityId, {
                 name: editActivityForm.name,
-                customId: editActivityForm.customId,
-                location: editActivityForm.location,
                 description: editActivityForm.description,
-                dates: {
-                    startDate: editActivityForm.startDate ? toUtcMidnightIso(editActivityForm.startDate) : undefined,
-                    targetDate: editActivityForm.targetDate ? toUtcMidnightIso(editActivityForm.targetDate) : undefined,
-                },
+                requiredDate: editActivityForm.requiredDate ? toUtcMidnightIso(editActivityForm.requiredDate) : undefined,
                 specialtyId: editActivityForm.specialtyId,
-                assignedTo: editActivityForm.assignedTo || null,
                 status: editActivityForm.status,
             });
             if (res.success) {
@@ -379,7 +372,7 @@ export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, 
     const handleDeleteActivity = (activityId: string) => {
         if (!confirm("Delete this activity?")) return;
         startTransition(async () => {
-            const res = await deleteCommitment(activityId);
+            const res = await deleteAssignment(activityId);
             if (res.success) router.refresh();
         });
     };
@@ -411,11 +404,13 @@ export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, 
                             {(!masterPlanImageUrl && !selectedFloorObj)
                                 ? "Upload a master plan image to get started"
                                 : mode === "placing"
-                                    ? `👆 Click on the plan to place the ${selectedFloorObj ? "activity" : "building"}`
+                                    ? selectedFloorObj
+                                        ? "👆 Click on the plan to place the activity"
+                                        : "👆 Click on the plan to place the building"
                                     : mode === "drawing"
-                                        ? `✏️ Draw a zone on the plan to define the ${selectedFloorObj ? "activity" : "building"} area`
+                                        ? "✏️ Draw a zone on the plan to define the building area"
                                         : selectedFloorObj
-                                            ? `${commitments.filter(c => c.floorId === selectedFloorObj._id).length} activities placed`
+                                                ? `${selectedFloorAssignments.length} activities on this floor`
                                             : `${buildings.length} building${buildings.length !== 1 ? "s" : ""} placed`
                             }
                         </p>
@@ -431,7 +426,7 @@ export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, 
                                 {uploadingMasterPlan ? "Uploading..." : "Change Plan"}
                             </button>
                         )}
-                        {((masterPlanImageUrl && !selectedFloorObj) || (selectedFloorObj && selectedFloorObj.gcsImageUrl)) && mode === "view" ? (
+                        {((masterPlanImageUrl && !selectedFloorObj) || selectedFloorObj) && mode === "view" ? (
                             <div className="flex items-center gap-2">
                                 {!showPlaceOptions ? (
                                     <button
@@ -439,7 +434,7 @@ export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, 
                                         className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-lg text-sm font-bold hover:bg-primary/90 transition-colors shadow-sm"
                                     >
                                         <span className="material-symbols-outlined text-[18px]">add_location_alt</span>
-                                        Place Pin
+                                        {selectedFloorObj ? "Place Assignment" : "Place Pin"}
                                     </button>
                                 ) : (
                                     <>
@@ -447,6 +442,7 @@ export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, 
                                             onClick={() => {
                                                 setMode("placing");
                                                 setNewBuilding({ name: "", code: "", number: buildings.length + 1 });
+                                                setNewActivityForm({ name: "", description: "", specialtyId: specialties[0]?._id || "", requiredDate: "" });
                                                 setPendingCoords(null);
                                                 setPendingPolygon(null);
                                                 setShowPlaceOptions(false);
@@ -456,19 +452,21 @@ export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, 
                                             <span className="material-symbols-outlined text-[18px]">push_pin</span>
                                             Exact Point
                                         </button>
-                                        <button
-                                            onClick={() => {
-                                                setMode("drawing");
-                                                setNewBuilding({ name: "", code: "", number: buildings.length + 1 });
-                                                setPendingCoords(null);
-                                                setPendingPolygon(null);
-                                                setShowPlaceOptions(false);
-                                            }}
-                                            className="flex items-center gap-2 px-3 py-2 bg-emerald-500 text-white rounded-lg text-sm font-bold hover:bg-emerald-600 transition-colors shadow-sm"
-                                        >
-                                            <span className="material-symbols-outlined text-[18px]">draw</span>
-                                            Draw Zone
-                                        </button>
+                                        {!selectedFloorObj && (
+                                            <button
+                                                onClick={() => {
+                                                    setMode("drawing");
+                                                    setNewBuilding({ name: "", code: "", number: buildings.length + 1 });
+                                                    setPendingCoords(null);
+                                                    setPendingPolygon(null);
+                                                    setShowPlaceOptions(false);
+                                                }}
+                                                className="flex items-center gap-2 px-3 py-2 bg-emerald-500 text-white rounded-lg text-sm font-bold hover:bg-emerald-600 transition-colors shadow-sm"
+                                            >
+                                                <span className="material-symbols-outlined text-[18px]">draw</span>
+                                                Draw Zone
+                                            </button>
+                                        )}
                                         <button
                                             onClick={() => setShowPlaceOptions(false)}
                                             className="flex items-center justify-center p-2 text-neutral-500 bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 dark:text-neutral-400 rounded-lg transition-colors shadow-sm"
@@ -502,7 +500,7 @@ export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, 
                         <p className="text-base font-bold text-neutral-700 dark:text-neutral-300">
                             No floor plan uploaded
                         </p>
-                        <p className="text-xs text-neutral-400 mt-3">Upload a plan to place activities</p>
+                        <p className="text-xs text-neutral-400 mt-3">Upload a plan to enable floor visualization</p>
                     </div>
                 ) : !masterPlanImageUrl && !selectedFloorObj ? (
                     <div
@@ -525,7 +523,7 @@ export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, 
                                 <InteractivePlanViewer
                                     imageUrl={selectedFloorObj?.gcsImageUrl || masterPlanImageUrl}
                                     hotspots={selectedFloorObj
-                                        ? commitments.filter(c => c.floorId === selectedFloorObj._id).map(c => ({
+                                        ? selectedFloorAssignments.map(c => ({
                                             ...c,
                                             name: c.name || c.description,
                                             code: c.specialtyName,
@@ -537,7 +535,7 @@ export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, 
                                             name: b.name,
                                             code: b.code,
                                             icon: "domain",
-                                            commitmentCount: commitmentCounts[b._id] ?? 0,
+                                            assignmentCount: assignmentCounts[b._id] ?? 0,
                                         }))
                                     }
                                     mode={mode}
@@ -545,7 +543,12 @@ export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, 
                                     pendingPolygon={pendingPolygon}
                                     selectedHotspotId={selectedFloorObj ? selectedActivity : selectedBuilding}
                                     onMapClick={(x, y) => {
-                                        if (mode === "placing" || mode === "drawing") {
+                                        if (selectedFloorObj && mode === "placing") {
+                                            setPendingCoords({ x, y });
+                                            return;
+                                        }
+
+                                        if (!selectedFloorObj && (mode === "placing" || mode === "drawing")) {
                                             setPendingCoords({ x, y });
                                         }
                                     }}
@@ -559,6 +562,7 @@ export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, 
                                         }
                                     }}
                                     onCreatePolygon={(pts) => {
+                                        if (selectedFloorObj) return;
                                         setPendingPolygon(pts);
                                         if (pts.length > 0) {
                                             const sumX = pts.reduce((s, p) => s + p.xPercent, 0);
@@ -570,130 +574,52 @@ export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, 
                             </div>
 
                             {/* Placing/Drawing mode: form below the plan */}
-                            {(mode === "placing" || mode === "drawing") && pendingCoords && (
+                            {!selectedFloorObj && (mode === "placing" || mode === "drawing") && pendingCoords && (
                                 <div className="bg-white dark:bg-neutral-900 border border-emerald-200 dark:border-emerald-800 rounded-xl p-5 shadow-sm relative z-10 mx-4 mb-4 mt-auto">
-                                    {selectedFloorObj ? (
-                                        <>
-                                            <div className="flex items-center gap-2 mb-3">
-                                                <span className="material-symbols-outlined text-emerald-500 text-[18px]">task_alt</span>
-                                                <span className="text-sm font-bold text-neutral-900 dark:text-white">
-                                                    New Activity at ({pendingCoords.x.toFixed(1)}%, {pendingCoords.y.toFixed(1)}%)
-                                                </span>
-                                            </div>
-                                            <div className="grid gap-3 mb-4">
-                                                <div className="grid grid-cols-2 gap-3">
-                                                    <input type="text" placeholder="Activity Name" value={newActivity.name}
-                                                        onChange={(e) => setNewActivity({ ...newActivity, name: e.target.value })}
-                                                        className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-700 rounded-lg text-sm bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:ring-primary focus:border-primary" />
-                                                    <input type="text" placeholder="Custom ID (Optional)" value={newActivity.customId}
-                                                        onChange={(e) => setNewActivity({ ...newActivity, customId: e.target.value })}
-                                                        className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-700 rounded-lg text-sm bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:ring-primary focus:border-primary" />
-                                                </div>
-                                                <div className="grid grid-cols-2 gap-3">
-                                                    <div>
-                                                        <label className="block text-[10px] font-semibold text-neutral-500 uppercase tracking-wider mb-1">Start Date</label>
-                                                        <input type="date" value={newActivity.startDate}
-                                                            onChange={(e) => setNewActivity({ ...newActivity, startDate: e.target.value })}
-                                                            className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-700 rounded-lg text-sm bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:ring-primary focus:border-primary" />
-                                                    </div>
-                                                    <div>
-                                                        <label className="block text-[10px] font-semibold text-neutral-500 uppercase tracking-wider mb-1">Target End</label>
-                                                        <input type="date" value={newActivity.targetDate}
-                                                            onChange={(e) => setNewActivity({ ...newActivity, targetDate: e.target.value })}
-                                                            className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-700 rounded-lg text-sm bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:ring-primary focus:border-primary" />
-                                                    </div>
-                                                </div>
-                                                <input type="text" placeholder="Location Details (Optional)" value={newActivity.location}
-                                                    onChange={(e) => setNewActivity({ ...newActivity, location: e.target.value })}
-                                                    className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-700 rounded-lg text-sm bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:ring-primary focus:border-primary" />
-                                                <textarea placeholder="Description" value={newActivity.description}
-                                                    onChange={(e) => setNewActivity({ ...newActivity, description: e.target.value })}
-                                                    className="w-full flex-1 px-3 py-2 border border-neutral-300 dark:border-neutral-700 rounded-lg text-sm bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:ring-primary focus:border-primary resize-none h-16" />
-                                            </div>
-                                            <div className="grid grid-cols-2 gap-3 mb-4">
-                                                <select value={newActivity.specialtyId} onChange={e => setNewActivity({ ...newActivity, specialtyId: e.target.value })}
-                                                    className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-700 rounded-lg text-sm bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:ring-primary focus:border-primary">
-                                                    <option value="" disabled>Select Specialty...</option>
-                                                    {specialties.map(s => (
-                                                        <option key={s._id} value={s._id}>{s.name}</option>
-                                                    ))}
-                                                </select>
-                                                <select value={newActivity.assignedTo} onChange={e => setNewActivity({ ...newActivity, assignedTo: e.target.value })}
-                                                    className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-700 rounded-lg text-sm bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:ring-primary focus:border-primary">
-                                                    <option value="">Unassigned</option>
-                                                    {activeUsers.filter(u => {
-                                                        const spec = specialties.find(s => s._id === newActivity.specialtyId);
-                                                        return !spec || u.specialtyName === spec.name;
-                                                    }).map(u => (
-                                                        <option key={u._id} value={u._id}>{u.name}</option>
-                                                    ))}
-                                                </select>
-                                                <select value={newActivity.status} onChange={e => setNewActivity({ ...newActivity, status: e.target.value })}
-                                                    className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-700 rounded-lg text-sm bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:ring-primary focus:border-primary col-span-2">
-                                                    {selectableStatuses.map(s => (
-                                                        <option key={s._id} value={s.name}>{s.name}</option>
-                                                    ))}
-                                                </select>
-                                            </div>
-                                            <div className="flex gap-2">
-                                                <button onClick={handleCreateActivity} disabled={isPending || !newActivity.name || !newActivity.specialtyId}
-                                                    className="px-4 py-2 bg-emerald-500 text-white rounded-lg text-sm font-bold hover:bg-emerald-600 transition-colors disabled:opacity-50 shadow-sm">
-                                                    Create Activity
-                                                </button>
-                                                <button onClick={() => { setPendingCoords(null); setPendingPolygon(null); setMode("view"); }}
-                                                    className="px-4 py-2 text-neutral-600 hover:bg-neutral-100 dark:hover:bg-neutral-800 rounded-lg text-sm font-medium transition-colors">
-                                                    Cancel
-                                                </button>
-                                            </div>
-                                        </>
-                                    ) : (
-                                        <>
-                                            <div className="flex items-center gap-2 mb-3">
-                                                <span className="material-symbols-outlined text-emerald-500 text-[18px]">{mode === "drawing" ? "draw" : "location_on"}</span>
-                                                <span className="text-sm font-bold text-neutral-900 dark:text-white">
-                                                    {mode === "drawing"
-                                                        ? `New Building Zone (${pendingPolygon?.length || 0} points)`
-                                                        : `New Building at (${pendingCoords.x.toFixed(1)}%, ${pendingCoords.y.toFixed(1)}%)`
-                                                    }
-                                                </span>
-                                            </div>
-                                            <div className="grid grid-cols-3 gap-3 mb-3">
-                                                <input type="text" placeholder="Name" value={newBuilding.name}
-                                                    onChange={(e) => setNewBuilding({ ...newBuilding, name: e.target.value })}
-                                                    className="px-3 py-2 border border-neutral-300 dark:border-neutral-700 rounded-lg text-sm bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:ring-primary focus:border-primary" />
-                                                <input type="text" placeholder="Code (e.g. BLD-01)" value={newBuilding.code}
-                                                    onChange={(e) => setNewBuilding({ ...newBuilding, code: e.target.value })}
-                                                    className="px-3 py-2 border border-neutral-300 dark:border-neutral-700 rounded-lg text-sm bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:ring-primary focus:border-primary" />
-                                                <input type="number" placeholder="Number" value={newBuilding.number} min={1}
-                                                    onChange={(e) => setNewBuilding({ ...newBuilding, number: parseInt(e.target.value) || 1 })}
-                                                    className="px-3 py-2 border border-neutral-300 dark:border-neutral-700 rounded-lg text-sm bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:ring-primary focus:border-primary" />
-                                            </div>
-                                            <div className="flex items-center gap-2 mb-4">
-                                                <span className="text-xs font-bold text-neutral-500 uppercase">Color:</span>
-                                                <div className="flex items-center gap-1.5 flex-wrap">
-                                                    {COLOR_OPTIONS.map(c => (
-                                                        <button
-                                                            key={c}
-                                                            onClick={() => setNewBuildingColor(c)}
-                                                            className={`w-6 h-6 rounded-full shadow-sm transition-transform hover:scale-110 ${newBuildingColor === c ? "ring-2 ring-offset-2 ring-offset-white dark:ring-offset-neutral-900 ring-primary scale-110" : "opacity-80 border border-neutral-200"}`}
-                                                            style={{ backgroundColor: c }}
-                                                            title={c}
-                                                        />
-                                                    ))}
-                                                </div>
-                                            </div>
-                                            <div className="flex gap-2">
-                                                <button onClick={handleCreateBuilding} disabled={isPending || !newBuilding.name || !newBuilding.code}
-                                                    className="px-4 py-2 bg-emerald-500 text-white rounded-lg text-sm font-bold hover:bg-emerald-600 transition-colors disabled:opacity-50 shadow-sm">
-                                                    Create Building
-                                                </button>
-                                                <button onClick={() => { setPendingCoords(null); setPendingPolygon(null); }}
-                                                    className="px-4 py-2 text-neutral-600 hover:bg-neutral-100 dark:hover:bg-neutral-800 rounded-lg text-sm font-medium transition-colors">
-                                                    {mode === "drawing" ? "Clear Drawing" : "Clear Pin"}
-                                                </button>
-                                            </div>
-                                        </>
-                                    )}
+                                    <div className="flex items-center gap-2 mb-3">
+                                        <span className="material-symbols-outlined text-emerald-500 text-[18px]">{mode === "drawing" ? "draw" : "location_on"}</span>
+                                        <span className="text-sm font-bold text-neutral-900 dark:text-white">
+                                            {mode === "drawing"
+                                                ? `New Building Zone (${pendingPolygon?.length || 0} points)`
+                                                : `New Building at (${pendingCoords.x.toFixed(1)}%, ${pendingCoords.y.toFixed(1)}%)`
+                                            }
+                                        </span>
+                                    </div>
+                                    <div className="grid grid-cols-3 gap-3 mb-3">
+                                        <input type="text" placeholder="Name" value={newBuilding.name}
+                                            onChange={(e) => setNewBuilding({ ...newBuilding, name: e.target.value })}
+                                            className="px-3 py-2 border border-neutral-300 dark:border-neutral-700 rounded-lg text-sm bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:ring-primary focus:border-primary" />
+                                        <input type="text" placeholder="Code (e.g. BLD-01)" value={newBuilding.code}
+                                            onChange={(e) => setNewBuilding({ ...newBuilding, code: e.target.value })}
+                                            className="px-3 py-2 border border-neutral-300 dark:border-neutral-700 rounded-lg text-sm bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:ring-primary focus:border-primary" />
+                                        <input type="number" placeholder="Number" value={newBuilding.number} min={1}
+                                            onChange={(e) => setNewBuilding({ ...newBuilding, number: parseInt(e.target.value) || 1 })}
+                                            className="px-3 py-2 border border-neutral-300 dark:border-neutral-700 rounded-lg text-sm bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:ring-primary focus:border-primary" />
+                                    </div>
+                                    <div className="flex items-center gap-2 mb-4">
+                                        <span className="text-xs font-bold text-neutral-500 uppercase">Color:</span>
+                                        <div className="flex items-center gap-1.5 flex-wrap">
+                                            {COLOR_OPTIONS.map(c => (
+                                                <button
+                                                    key={c}
+                                                    onClick={() => setNewBuildingColor(c)}
+                                                    className={`w-6 h-6 rounded-full shadow-sm transition-transform hover:scale-110 ${newBuildingColor === c ? "ring-2 ring-offset-2 ring-offset-white dark:ring-offset-neutral-900 ring-primary scale-110" : "opacity-80 border border-neutral-200"}`}
+                                                    style={{ backgroundColor: c }}
+                                                    title={c}
+                                                />
+                                            ))}
+                                        </div>
+                                    </div>
+                                    <div className="flex gap-2">
+                                        <button onClick={handleCreateBuilding} disabled={isPending || !newBuilding.name || !newBuilding.code}
+                                            className="px-4 py-2 bg-emerald-500 text-white rounded-lg text-sm font-bold hover:bg-emerald-600 transition-colors disabled:opacity-50 shadow-sm">
+                                            Create Building
+                                        </button>
+                                        <button onClick={() => { setPendingCoords(null); setPendingPolygon(null); }}
+                                            className="px-4 py-2 text-neutral-600 hover:bg-neutral-100 dark:hover:bg-neutral-800 rounded-lg text-sm font-medium transition-colors">
+                                            {mode === "drawing" ? "Clear Drawing" : "Clear Pin"}
+                                        </button>
+                                    </div>
                                 </div>
                             )}
                         </div>
@@ -720,7 +646,7 @@ export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, 
                             </div>
                         ) : (
                             buildings.map(b => {
-                                const count = commitmentCounts[b._id] || 0;
+                                const count = assignmentCounts[b._id] || 0;
                                 return (
                                     <button
                                         key={b._id}
@@ -955,7 +881,12 @@ export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, 
 
                                         return (
                                             <div key={floor._id}
-                                                onClick={() => setSelectedFloor(floor._id)}
+                                                onClick={() => {
+                                                    setSelectedFloor(floor._id);
+                                                    setMode("view");
+                                                    setPendingCoords(null);
+                                                    setPendingPolygon(null);
+                                                }}
                                                 className="flex items-center justify-between bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-lg px-3 py-2.5 group cursor-pointer hover:border-primary/50 transition-all">
                                                 <div className="flex items-center gap-2.5">
                                                     {floor.gcsImageUrl ? (
@@ -1004,136 +935,190 @@ export function BuildingsTab({ buildings, currentProjectId, masterPlanImageUrl, 
                         <div className="flex items-center justify-between">
                             <div>
                                 <h3 className="text-sm font-bold text-neutral-700 dark:text-neutral-300 uppercase tracking-wider">{selectedFloorObj.label}</h3>
-                                <p className="text-xs text-neutral-500">Activities on this floor</p>
+                                <p className="text-xs text-neutral-500">
+                                    {isPlacingAssignment
+                                        ? "Click on the plan to place the assignment, then complete the form"
+                                        : "Assignments on this floor"
+                                    }
+                                </p>
                             </div>
                         </div>
 
-                        {/* Activities List */}
-                        <div className="space-y-2">
-                            {commitments.filter(c => c.floorId === selectedFloorObj._id).length === 0 ? (
-                                <div className="flex flex-col items-center justify-center py-8 text-neutral-500 bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-800">
-                                    <span className="material-symbols-outlined text-3xl mb-2 text-neutral-300">task_alt</span>
-                                    <p className="text-sm font-medium">No activities</p>
-                                    <p className="text-xs mt-1 text-center">Select &quot;Place Pin&quot; and click on<br />the plan to add an activity</p>
+                        {isPlacingAssignment ? (
+                            <div className="bg-white dark:bg-neutral-900 border border-primary/30 dark:border-primary/40 rounded-xl p-4 shadow-sm">
+                                <div className="flex items-center gap-2 mb-3">
+                                    <span className="material-symbols-outlined text-primary text-[18px]">push_pin</span>
+                                    <span className="text-sm font-bold text-neutral-900 dark:text-white">New Assignment</span>
                                 </div>
-                            ) : (
-                                commitments.filter(c => c.floorId === selectedFloorObj._id).map(activity => (
-                                    <div key={activity._id}
-                                        onClick={() => {
-                                            if (editingActivity !== activity._id) {
-                                                setSelectedActivity(activity._id);
-                                                setFocusPulse(p => p + 1);
-                                            }
-                                        }}
-                                        className={`bg-white dark:bg-neutral-900 border ${selectedActivity === activity._id ? 'border-primary ring-1 ring-primary' : 'border-neutral-200 dark:border-neutral-800'} rounded-lg p-3 shadow-sm group cursor-pointer transition-all hover:border-primary/50`}>
 
-                                        {editingActivity === activity._id ? (
-                                            <div className="space-y-3" onClick={e => e.stopPropagation()}>
-                                                <div className="grid grid-cols-2 gap-2">
+                                <div className="mb-3 rounded-lg border border-dashed border-primary/30 px-3 py-2 text-xs text-neutral-600 dark:text-neutral-300">
+                                    {pendingCoords
+                                        ? `Pin selected at ${pendingCoords.x.toFixed(1)}%, ${pendingCoords.y.toFixed(1)}%`
+                                        : "Click on the floor plan to choose where the assignment will be placed"
+                                    }
+                                </div>
+
+                                <div className="grid grid-cols-1 gap-3 mb-3">
+                                    <input
+                                        type="text"
+                                        placeholder="Title"
+                                        value={newActivityForm.name}
+                                        onChange={(e) => setNewActivityForm({ ...newActivityForm, name: e.target.value })}
+                                        className="px-3 py-2 border border-neutral-300 dark:border-neutral-700 rounded-lg text-sm bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:ring-primary focus:border-primary"
+                                    />
+                                    <select
+                                        value={newActivityForm.specialtyId}
+                                        onChange={(e) => setNewActivityForm({ ...newActivityForm, specialtyId: e.target.value })}
+                                        className="px-3 py-2 border border-neutral-300 dark:border-neutral-700 rounded-lg text-sm bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:ring-primary focus:border-primary"
+                                    >
+                                        <option value="">Select specialty</option>
+                                        {specialties.map((specialty) => (
+                                            <option key={specialty._id} value={specialty._id}>
+                                                {specialty.name}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+
+                                <textarea
+                                    placeholder="Description"
+                                    value={newActivityForm.description}
+                                    onChange={(e) => setNewActivityForm({ ...newActivityForm, description: e.target.value })}
+                                    className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-700 rounded-lg text-sm bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:ring-primary focus:border-primary mb-3"
+                                    rows={3}
+                                />
+
+                                <div className="grid grid-cols-1 gap-3 mb-4">
+                                    <div>
+                                        <label className="block text-xs font-bold text-neutral-500 uppercase mb-1">Required Date</label>
+                                        <input
+                                            type="date"
+                                            value={newActivityForm.requiredDate}
+                                            onChange={(e) => setNewActivityForm({ ...newActivityForm, requiredDate: e.target.value })}
+                                            className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-700 rounded-lg text-sm bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:ring-primary focus:border-primary"
+                                        />
+                                    </div>
+                                </div>
+
+                                <div className="flex gap-2">
+                                    <button
+                                        onClick={handleCreateActivity}
+                                        disabled={isPending || !pendingCoords || !newActivityForm.name || !newActivityForm.specialtyId || !newActivityForm.requiredDate}
+                                        className="px-4 py-2 bg-primary text-white rounded-lg text-sm font-bold hover:bg-primary/90 transition-colors disabled:opacity-50 shadow-sm"
+                                    >
+                                        Create Activity
+                                    </button>
+                                    <button
+                                        onClick={() => {
+                                            setPendingCoords(null);
+                                            setPendingPolygon(null);
+                                        }}
+                                        className="px-4 py-2 text-neutral-600 hover:bg-neutral-100 dark:hover:bg-neutral-800 rounded-lg text-sm font-medium transition-colors"
+                                    >
+                                        Clear Pin
+                                    </button>
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="space-y-2">
+                                {selectedFloorAssignments.length === 0 ? (
+                                    <div className="flex flex-col items-center justify-center py-8 text-neutral-500 bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-800">
+                                        <span className="material-symbols-outlined text-3xl mb-2 text-neutral-300">task_alt</span>
+                                        <p className="text-sm font-medium">No activities</p>
+                                        <p className="text-xs mt-1 text-center">Create assignments from Detail Plan<br />after selecting this floor</p>
+                                    </div>
+                                ) : (
+                                    selectedFloorAssignments.map(activity => (
+                                        <div key={activity._id}
+                                            onClick={() => {
+                                                if (editingActivity !== activity._id) {
+                                                    setSelectedActivity(activity._id);
+                                                    setFocusPulse(p => p + 1);
+                                                }
+                                            }}
+                                            className={`bg-white dark:bg-neutral-900 border ${selectedActivity === activity._id ? 'border-primary ring-1 ring-primary' : 'border-neutral-200 dark:border-neutral-800'} rounded-lg p-3 shadow-sm group cursor-pointer transition-all hover:border-primary/50`}>
+
+                                            {editingActivity === activity._id ? (
+                                                <div className="space-y-3" onClick={e => e.stopPropagation()}>
                                                     <input value={editActivityForm.name} onChange={(e) => setEditActivityForm({ ...editActivityForm, name: e.target.value })}
                                                         className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-700 rounded-lg text-sm bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100" placeholder="Activity Name" />
-                                                    <input value={editActivityForm.customId} onChange={(e) => setEditActivityForm({ ...editActivityForm, customId: e.target.value })}
-                                                        className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-700 rounded-lg text-sm bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100" placeholder="Custom ID" />
-                                                </div>
-                                                <div className="grid grid-cols-2 gap-2">
                                                     <div>
-                                                        <label className="block text-[9px] font-semibold text-neutral-500 uppercase tracking-wider mb-1">Start Date</label>
-                                                        <input type="date" value={editActivityForm.startDate} onChange={(e) => setEditActivityForm({ ...editActivityForm, startDate: e.target.value })}
+                                                        <label className="block text-[9px] font-semibold text-neutral-500 uppercase tracking-wider mb-1">Required Date</label>
+                                                        <input type="date" value={editActivityForm.requiredDate} onChange={(e) => setEditActivityForm({ ...editActivityForm, requiredDate: e.target.value })}
                                                             className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-700 rounded-lg text-sm bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100" />
                                                     </div>
-                                                    <div>
-                                                        <label className="block text-[9px] font-semibold text-neutral-500 uppercase tracking-wider mb-1">Target End</label>
-                                                        <input type="date" value={editActivityForm.targetDate} onChange={(e) => setEditActivityForm({ ...editActivityForm, targetDate: e.target.value })}
-                                                            className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-700 rounded-lg text-sm bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100" />
+                                                    <textarea value={editActivityForm.description} onChange={(e) => setEditActivityForm({ ...editActivityForm, description: e.target.value })}
+                                                        className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-700 rounded-lg text-sm bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 resize-none h-16" placeholder="Description (optional)" />
+                                                    <div className="grid grid-cols-2 gap-2">
+                                                        <select value={editActivityForm.specialtyId} onChange={e => setEditActivityForm({ ...editActivityForm, specialtyId: e.target.value })}
+                                                            className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-700 rounded-lg text-sm bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100">
+                                                            <option value="" disabled>Specialty</option>
+                                                            {specialties.map(s => <option key={s._id} value={s._id}>{s.name}</option>)}
+                                                        </select>
+                                                        <select value={editActivityForm.status} onChange={e => setEditActivityForm({ ...editActivityForm, status: e.target.value })}
+                                                            className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-700 rounded-lg text-sm bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 col-span-2">
+                                                            {selectableStatuses.map(s => (
+                                                                <option key={s._id} value={s.name}>{s.name}</option>
+                                                            ))}
+                                                        </select>
+                                                    </div>
+                                                    <div className="flex gap-2 pt-1">
+                                                        <button onClick={() => handleEditActivity(activity._id)} disabled={isPending}
+                                                            className="px-3 py-1.5 bg-emerald-500 text-white rounded-lg text-xs font-bold hover:bg-emerald-600 disabled:opacity-50">Save</button>
+                                                        <button onClick={() => setEditingActivity(null)}
+                                                            className="px-3 py-1.5 text-neutral-500 hover:bg-neutral-100 rounded-lg text-xs font-medium">Cancel</button>
                                                     </div>
                                                 </div>
-                                                <input value={editActivityForm.location} onChange={(e) => setEditActivityForm({ ...editActivityForm, location: e.target.value })}
-                                                    className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-700 rounded-lg text-sm bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100" placeholder="Location Details" />
-                                                <textarea value={editActivityForm.description} onChange={(e) => setEditActivityForm({ ...editActivityForm, description: e.target.value })}
-                                                    className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-700 rounded-lg text-sm bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 resize-none h-16" placeholder="Description (optional)" />
-                                                <div className="grid grid-cols-2 gap-2">
-                                                    <select value={editActivityForm.specialtyId} onChange={e => setEditActivityForm({ ...editActivityForm, specialtyId: e.target.value, assignedTo: "" })}
-                                                        className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-700 rounded-lg text-sm bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100">
-                                                        <option value="" disabled>Specialty</option>
-                                                        {specialties.map(s => <option key={s._id} value={s._id}>{s.name}</option>)}
-                                                    </select>
-                                                    <select value={editActivityForm.assignedTo} onChange={e => setEditActivityForm({ ...editActivityForm, assignedTo: e.target.value })}
-                                                        className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-700 rounded-lg text-sm bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100">
-                                                        <option value="">No Assignee</option>
-                                                        {activeUsers.filter(u => editActivityForm.specialtyId && u.specialtyName === specialties.find(s => s._id === editActivityForm.specialtyId)?.name).map(u => (
-                                                            <option key={u._id} value={u._id}>{u.name}</option>
-                                                        ))}
-                                                    </select>
-                                                    <select value={editActivityForm.status} onChange={e => setEditActivityForm({ ...editActivityForm, status: e.target.value })}
-                                                        className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-700 rounded-lg text-sm bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 col-span-2">
-                                                        {selectableStatuses.map(s => (
-                                                            <option key={s._id} value={s.name}>{s.name}</option>
-                                                        ))}
-                                                    </select>
-                                                </div>
-                                                <div className="flex gap-2 pt-1">
-                                                    <button onClick={() => handleEditActivity(activity._id)} disabled={isPending}
-                                                        className="px-3 py-1.5 bg-emerald-500 text-white rounded-lg text-xs font-bold hover:bg-emerald-600 disabled:opacity-50">Save</button>
-                                                    <button onClick={() => setEditingActivity(null)}
-                                                        className="px-3 py-1.5 text-neutral-500 hover:bg-neutral-100 rounded-lg text-xs font-medium">Cancel</button>
-                                                </div>
-                                            </div>
-                                        ) : (
-                                            <div className="flex items-start justify-between">
-                                                <div className="flex items-start gap-2 max-w-[80%]">
-                                                    <div className="size-3 rounded-full mt-1 shrink-0 shadow-sm border border-black/10" style={{ backgroundColor: activity.specialtyColor || "#8B5CF6" }} />
-                                                    <div>
-                                                        <p className="text-sm font-bold text-neutral-900 dark:text-white leading-tight">{activity.name}</p>
-                                                        {activity.description && <p className="text-xs text-neutral-500 line-clamp-1 mt-0.5">{activity.description}</p>}
-                                                        <div className="flex flex-wrap gap-1.5 mt-2">
-                                                            <span className="inline-flex items-center justify-center px-1.5 py-1 rounded bg-neutral-100 dark:bg-neutral-800 text-[10px] font-bold text-neutral-600 dark:text-neutral-400 leading-none border border-neutral-200/50 dark:border-neutral-700/50">
-                                                                {activity.specialtyName}
-                                                            </span>
-                                                            {activity.assignedToId && activeUsers.find(u => u._id === activity.assignedToId) && (
-                                                                <span className="inline-flex items-center justify-center px-1.5 py-1 rounded bg-neutral-100 dark:bg-neutral-800 text-[10px] font-bold text-neutral-600 dark:text-neutral-400 gap-1 leading-none border border-neutral-200/50 dark:border-neutral-700/50">
-                                                                    <span className="material-symbols-outlined text-[11px] leading-none">person</span>
-                                                                    {activeUsers.find(u => u._id === activity.assignedToId)?.name.split(' ')[0]}
+                                            ) : (
+                                                <div className="flex items-start justify-between">
+                                                    <div className="flex items-start gap-2 max-w-[80%]">
+                                                        <div className="size-3 rounded-full mt-1 shrink-0 shadow-sm border border-black/10" style={{ backgroundColor: activity.specialtyColor || "#8B5CF6" }} />
+                                                        <div>
+                                                            <p className="text-sm font-bold text-neutral-900 dark:text-white leading-tight">{activity.name}</p>
+                                                            {activity.description && <p className="text-xs text-neutral-500 line-clamp-1 mt-0.5">{activity.description}</p>}
+                                                            <div className="flex flex-wrap gap-1.5 mt-2">
+                                                                <span className="inline-flex items-center justify-center px-1.5 py-1 rounded bg-neutral-100 dark:bg-neutral-800 text-[10px] font-bold text-neutral-600 dark:text-neutral-400 leading-none border border-neutral-200/50 dark:border-neutral-700/50">
+                                                                    {activity.specialtyName}
                                                                 </span>
-                                                            )}
-                                                            <span className="inline-flex items-center justify-center px-1.5 py-1 rounded text-[10px] font-black uppercase tracking-wider leading-none border" style={{ 
-                                                                backgroundColor: `${getStatusColor(activity.status)}15`,
-                                                                color: getStatusColor(activity.status),
-                                                                borderColor: `${getStatusColor(activity.status)}30`
-                                                            }}>
-                                                                {activity.status}
-                                                            </span>
+                                                                <span className="inline-flex items-center justify-center px-1.5 py-1 rounded text-[10px] font-black uppercase tracking-wider leading-none border" style={{
+                                                                    backgroundColor: `${getStatusColor(activity.status)}15`,
+                                                                    color: getStatusColor(activity.status),
+                                                                    borderColor: `${getStatusColor(activity.status)}30`
+                                                                }}>
+                                                                    {activity.status}
+                                                                </span>
+                                                                <span className="inline-flex items-center justify-center px-1.5 py-1 rounded bg-neutral-100 dark:bg-neutral-800 text-[10px] font-bold text-neutral-600 dark:text-neutral-400 leading-none border border-neutral-200/50 dark:border-neutral-700/50">
+                                                                    {toDateInputValue(activity.requiredDate)}
+                                                                </span>
+                                                            </div>
                                                         </div>
                                                     </div>
+                                                    <div className="flex gap-1">
+                                                        <button onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            setEditingActivity(activity._id);
+                                                            setEditActivityForm({
+                                                                name: activity.name,
+                                                                description: activity.description || "",
+                                                                specialtyId: activity.specialtyId,
+                                                                requiredDate: toDateInputValue(activity.requiredDate),
+                                                                status: activity.status
+                                                            });
+                                                        }} className="p-1 text-neutral-400 hover:text-primary hover:bg-primary/10 rounded transition-colors opacity-0 group-hover:opacity-100" title="Edit Activity">
+                                                            <span className="material-symbols-outlined text-[16px]">edit</span>
+                                                        </button>
+                                                        <button onClick={(e) => { e.stopPropagation(); handleDeleteActivity(activity._id); }}
+                                                            className="p-1 text-neutral-400 hover:text-rose-500 hover:bg-rose-50 rounded transition-colors opacity-0 group-hover:opacity-100" title="Delete Activity">
+                                                            <span className="material-symbols-outlined text-[16px]">delete</span>
+                                                        </button>
+                                                    </div>
                                                 </div>
-                                                <div className="flex gap-1">
-                                                    <button onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        setEditingActivity(activity._id);
-                                                        setEditActivityForm({
-                                                            name: activity.name,
-                                                            customId: activity.customId || "",
-                                                            location: activity.location || "",
-                                                            startDate: toDateInputValue(activity.dates?.startDate),
-                                                            targetDate: toDateInputValue(activity.dates?.targetDate),
-                                                            description: activity.description || "",
-                                                            specialtyId: activity.specialtyId,
-                                                            assignedTo: activity.assignedToId || "",
-                                                            status: activity.status
-                                                        });
-                                                    }} className="p-1 text-neutral-400 hover:text-primary hover:bg-primary/10 rounded transition-colors opacity-0 group-hover:opacity-100" title="Edit Activity">
-                                                        <span className="material-symbols-outlined text-[16px]">edit</span>
-                                                    </button>
-                                                    <button onClick={(e) => { e.stopPropagation(); handleDeleteActivity(activity._id); }}
-                                                        className="p-1 text-neutral-400 hover:text-rose-500 hover:bg-rose-50 rounded transition-colors opacity-0 group-hover:opacity-100" title="Delete Activity">
-                                                        <span className="material-symbols-outlined text-[16px]">delete</span>
-                                                    </button>
-                                                </div>
-                                            </div>
-                                        )}
-                                    </div>
-                                ))
-                            )}
-                        </div>
+                                            )}
+                                        </div>
+                                    ))
+                                )}
+                            </div>
+                        )}
                     </div>
                 )}
             </div>

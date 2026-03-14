@@ -2,7 +2,7 @@ import React from "react";
 import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import connectToDatabase from "@/lib/mongodb";
-import { getFloorData, getFloorCommitments, getSpecialtiesWithUsers } from "./actions";
+import { getFloorData, getFloorAssignments, getSpecialtiesWithUsers } from "./actions";
 import { statusRepository } from "@/repositories/status.repository";
 import { roleRepository } from "@/repositories/role.repository";
 import { DetailPlanView } from "./DetailPlanView";
@@ -35,27 +35,37 @@ export default async function DetailPlanPage({
     }
 
     // Fetch data in parallel
-    const [commitments, { specialties, users }, statuses] = await Promise.all([
-        getFloorCommitments(floorId),
+    const [assignments, { specialties }, statuses] = await Promise.all([
+        getFloorAssignments(floorId),
         getSpecialtiesWithUsers(floorData.projectId),
-        statusRepository.getAll(),
+        statusRepository.getAll(floorData.projectId),
     ]);
 
     const membershipRole = currentMembership?.roleId
         ? await roleRepository.getByIdInProject(currentMembership.roleId, floorData.projectId)
         : null;
-    const canViewAllCommitments = Boolean(membershipRole?.isManager);
+    const canViewAllAssignments = Boolean(membershipRole?.isManager);
 
-    const filteredCommitments = canViewAllCommitments
-        ? commitments
-        : commitments.filter(c => c.assignedToId === session.user.id || c.requesterId === session.user.id);
+    const membershipSpecialty = currentMembership.specialtyId as unknown;
+    const membershipSpecialtyId =
+        membershipSpecialty && typeof membershipSpecialty === "object" && "_id" in membershipSpecialty
+            ? (membershipSpecialty as { _id?: { toString: () => string } })._id?.toString() || ""
+            : typeof membershipSpecialty === "string"
+                ? membershipSpecialty
+                : "";
+
+    const filteredAssignments = canViewAllAssignments
+        ? assignments
+        : assignments.filter((assignment) => (
+            assignment.requesterId === session.user.id
+            || (membershipSpecialtyId && assignment.specialtyId === membershipSpecialtyId)
+        ));
 
     return (
         <DetailPlanView
             floorData={floorData}
-            commitments={filteredCommitments}
+            assignments={filteredAssignments}
             specialties={specialties}
-            users={users}
             statuses={statuses.map(s => ({ _id: s._id.toString(), name: s.name, colorHex: s.colorHex }))}
             currentUserId={session.user.id || ""}
         />

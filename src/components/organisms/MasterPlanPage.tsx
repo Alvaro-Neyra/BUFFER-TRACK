@@ -22,13 +22,12 @@ interface IBuildingData {
     floors: IFloorData[];
 }
 
-export interface IPendingCommitment {
+export interface IPendingAssignment {
     _id: string;
     name: string;
     status: string;
     specialtyName: string;
     specialtyColor: string;
-    assignedToName: string;
     buildingCode: string;
     buildingId: string;
     floorLabel: string;
@@ -40,22 +39,22 @@ export interface IPendingCommitment {
 interface IMasterPlanPageProps {
     masterPlanImageUrl: string;
     buildings: IBuildingData[];
-    commitments: IPendingCommitment[];
+    assignments: IPendingAssignment[];
     initialOpenBuildingId?: string | null;
 }
 
 export function MasterPlanPage({
     masterPlanImageUrl,
     buildings,
-    commitments,
+    assignments,
     initialOpenBuildingId = null,
 }: IMasterPlanPageProps) {
     const [selectedHotspotId, setSelectedHotspotId] = useState<string | null>(null);
     const [focusPulse, setFocusPulse] = useState(0);
     const [selectedBuildingForModal, setSelectedBuildingForModal] = useState<IBuildingData | null>(null);
 
-    const commitmentCountsByBuilding = commitments.reduce<Record<string, number>>((acc, commitment) => {
-        acc[commitment.buildingId] = (acc[commitment.buildingId] ?? 0) + 1;
+    const assignmentCountsByBuilding = assignments.reduce<Record<string, number>>((acc, assignment) => {
+        acc[assignment.buildingId] = (acc[assignment.buildingId] ?? 0) + 1;
         return acc;
     }, {});
 
@@ -99,7 +98,7 @@ export function MasterPlanPage({
                                     imageUrl={masterPlanImageUrl}
                                     hotspots={buildings.map((building) => ({
                                         ...building,
-                                        commitmentCount: commitmentCountsByBuilding[building._id] ?? 0,
+                                        assignmentCount: assignmentCountsByBuilding[building._id] ?? 0,
                                     }))}
                                     mode="view"
                                     selectedHotspotId={selectedHotspotId}
@@ -118,7 +117,7 @@ export function MasterPlanPage({
                         </div>
 
                         <PendingTasksSidebar
-                            commitments={commitments}
+                            assignments={assignments}
                             onTaskClick={focusAndOpenBuilding}
                         />
                     </div>

@@ -2,12 +2,12 @@ import React from "react";
 import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import connectToDatabase from "@/lib/mongodb";
-import { getProjectCommitments } from "./actions";
+import { getProjectAssignments } from "./actions";
 import { ProjectService } from "@/services/project.service";
-import { CommitmentsView } from "./CommitmentsView";
+import { AssignmentsView } from "./AssignmentsView";
 import { PendingAccessView } from "@/components/organisms/PendingAccessView";
 
-export default async function CommitmentsPage({
+export default async function AssignmentsPage({
     searchParams
 }: {
     searchParams: Promise<{ [key: string]: string | string[] | undefined }>
@@ -42,11 +42,11 @@ export default async function CommitmentsPage({
         ? queryProjectId
         : projectsList[0].id;
 
-    const data = await getProjectCommitments(currentProjectId);
+    const data = await getProjectAssignments(currentProjectId);
 
     return (
-        <CommitmentsView
-            commitments={data.commitments}
+        <AssignmentsView
+            assignments={data.assignments}
             statuses={data.statuses}
             projectsList={projectsList}
             currentProjectId={currentProjectId}

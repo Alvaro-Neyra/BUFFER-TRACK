@@ -2,7 +2,7 @@ import { z } from "zod";
 
 const optionalCompanySchema = z.preprocess(
     (value) => {
-        if (typeof value !== "string") return undefined;
+        if (typeof value !== "string") return value;
         const trimmed = value.trim();
         return trimmed.length > 0 ? trimmed : undefined;
     },
