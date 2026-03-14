@@ -17,7 +17,7 @@
 
 **BufferTrack** is a SaaS web application for construction project management based on
 **Lean Construction** and the **Last Planner System (LPS)**. It allows construction teams
-to manage commitments, visualize interactive floor plans with activity pins, and calculate
+to manage assignments, visualize interactive floor plans with activity pins, and calculate
 the PPC (Percent Plan Complete) in real time.
 
 Key capabilities:
@@ -127,7 +127,7 @@ users             → Role, specialty, company, approval status
 projects          → Name, description, configuration
 buildings         → Code, number, X%/Y% coordinates on master plan
 floors            → Cloudinary URL + publicId, order, label, buildingId ref
-commitments       → Specialty, requester, assignee, X%/Y% coords, status, dates
+assignments       → Specialty, requester, assignee, X%/Y% coords, status, dates
 weeklySnapshots   → Frozen weekly PPC data for historical reporting
 restrictions      → Active blockers linked to a commitment
 specialties       → Name + configurable hex color (admin-managed)
@@ -182,7 +182,7 @@ In Progress:      #F59E0B
 | In Progress | `#F59E0B` | 🟡 Yellow fill |
 | Completed | `#10B981` | 🟢 Green fill |
 | Delayed | `#EF4444` | 🔴 Red fill |
-| Restriction | `#EF4444` | ⚠️ Warning icon |
+| Constrained | `#EF4444` | ⚠️ Warning icon |
 
 ### UI rules
 - **Mobile-first** — plan viewer takes 100% on mobile
@@ -266,7 +266,8 @@ Solicitud (Request)
 - Integration tests: critical API routes (commitment creation, PPC calculation)
 - File naming: `ComponentName.test.tsx` co-located with source file
 - Mock MongoDB with `mongodb-memory-server`
-- Run before every commit: `npm run lint && npx tsc --noEmit && npm test`
+- After any agent file edits, always run `npm run lint` and `npx tsc --noEmit` to validate lint and TypeScript typing for changed files before handoff
+- Run before every commit (without asking permission): `npm run lint && npx tsc --noEmit && npm test`
 
 ---
 
@@ -274,8 +275,55 @@ Solicitud (Request)
 
 - Branch naming: `feat/<name>`, `fix/<name>`, `chore/<name>`
 - Commit format: `[buffertrack] <type>: <description>`
-- Always run `npm run lint && npm test` before committing
+- Always run `npm run lint && npx tsc --noEmit && npm test` before committing
 - Never commit `.env.local` or service account keys
+
+### Agent PR Handoff Protocol (No GitHub CLI)
+
+- Do not use `gh` commands in this repository workflow
+- If asked to create a PR, provide PR **Title** and **Description** as Markdown in a fenced code block
+- After sending PR data, always include how to sync local `main` after PR merge to avoid local/remote inconsistencies and prevent data loss
+
+Recommended sync commands after PR is merged to `main`:
+
+```bash
+# If working tree is clean
+git fetch origin
+git switch main
+git pull --rebase origin main
+```
+
+```bash
+# If there are local uncommitted changes (safe flow)
+git stash push -u -m "wip-before-main-sync"
+git fetch origin
+git switch main
+git pull --rebase origin main
+# Optional: return to previous branch and restore work
+git switch -
+git stash pop
+```
+
+### Feature History Documentation (Mandatory)
+
+- Every time a new feature is requested and implemented, create a Markdown record in `docs/`.
+- Use a conventional filename: `YYYY-MM-DD-feature-name.md` (kebab-case).
+- Keep one file per feature; if the user says the feature is incomplete, update the same file instead of creating a new one.
+- Required sections for each feature record:
+  - `Title`
+  - `Context`
+  - `Scope`
+  - `Implementation Summary`
+  - `Files Updated`
+  - `Validation`
+  - `Pending Work` (if any)
+  - `Change Log` (append follow-up clarifications/fixes with date)
+
+Recommended path example:
+
+```text
+docs/2026-03-13-assignment-detail-only-creation.md
+```
 
 ---
 
